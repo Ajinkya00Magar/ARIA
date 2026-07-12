@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send, Square, RotateCcw, Sparkles, Plus, Bot, User,
   ChevronDown, ChevronRight, Wrench, CheckCircle2, XCircle, Loader2, Copy,
+  AlertCircle, FileCode, Terminal as TermIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -16,13 +17,32 @@ import { toast } from 'sonner';
 import { generateId } from '@ibm-agent/shared';
 import type { AgentEvent } from '@ibm-agent/types';
 import { cn } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
+
+interface ToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  duration?: number;
+  status: 'running' | 'done' | 'error';
+}
+
+// Tools that modify files — trigger explorer refresh
+const FILE_MODIFYING_TOOLS = new Set([
+  'write_file', 'create_file', 'delete_file', 'rename_file',
+  'write', 'create', 'delete', 'rename', 'mkdir',
+]);
 
 export function ChatPanel() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [activeMsgToolCalls, setActiveMsgToolCalls] = useState<Map<string, ToolCall>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const queryClient = useQueryClient();
 
   const { messages, agentStatus, addMessage, appendStreamDelta, finalizeStream, setAgentStatus, clearMessages } =
     useAgentStore();
@@ -78,6 +98,11 @@ export function ChatPanel() {
     const userMessage = (overrideInput ?? input).trim();
     if (!userMessage || isStreaming) return;
 
+    if (!currentWorkspace) {
+      toast.warning('Open a workspace first so the agent can read and write files.');
+      return;
+    }
+
     setInput('');
     setIsStreaming(true);
 
@@ -94,6 +119,10 @@ export function ChatPanel() {
     setAbortController(controller);
     setAgentStatus('thinking');
 
+    // Track tool calls for the current assistant response
+    const toolCallMap = new Map<string, ToolCall>();
+    setActiveMsgToolCalls(new Map());
+
     try {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/agent/run`,
@@ -106,7 +135,7 @@ export function ChatPanel() {
           body: JSON.stringify({
             chatId,
             content: userMessage,
-            workspaceId: currentWorkspace?.id ?? '',
+            workspaceId: currentWorkspace.id,
           }),
           signal: controller.signal,
         },
@@ -133,7 +162,7 @@ export function ChatPanel() {
 
           try {
             const event: AgentEvent = JSON.parse(raw);
-            handleAgentEvent(event);
+            handleAgentEvent(event, toolCallMap);
           } catch {
             // skip malformed lines
           }
@@ -148,11 +177,12 @@ export function ChatPanel() {
       setIsStreaming(false);
       setAgentStatus('idle');
       setAbortController(null);
+      setActiveMsgToolCalls(new Map());
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, isStreaming, currentWorkspace, accessToken, addMessage, setAgentStatus]);
 
-  function handleAgentEvent(event: AgentEvent) {
+  function handleAgentEvent(event: AgentEvent, toolCallMap: Map<string, ToolCall>) {
     switch (event.type) {
       case 'content_delta':
         appendStreamDelta((event.data as { delta: string }).delta);
@@ -169,6 +199,46 @@ export function ChatPanel() {
         toast.error((event.data as { error: string }).error);
         setAgentStatus('error');
         break;
+      case 'tool_start': {
+        const { toolCallId, toolName, arguments: args } = event.data as {
+          toolCallId: string; toolName: string; arguments: Record<string, unknown>;
+        };
+        const tc: ToolCall = { id: toolCallId, name: toolName, args: args ?? {}, status: 'running' };
+        toolCallMap.set(toolCallId, tc);
+        setActiveMsgToolCalls(new Map(toolCallMap));
+        setAgentStatus('executing');
+        break;
+      }
+      case 'tool_end': {
+        const { toolCallId, output, duration } = event.data as {
+          toolCallId: string; output: string; duration: number;
+        };
+        const tc = toolCallMap.get(toolCallId);
+        if (tc) {
+          tc.status = 'done';
+          tc.output = output;
+          tc.duration = duration;
+          toolCallMap.set(toolCallId, tc);
+          setActiveMsgToolCalls(new Map(toolCallMap));
+
+          // Refresh file tree if this was a file-modifying tool
+          if (FILE_MODIFYING_TOOLS.has(tc.name) && currentWorkspace) {
+            void queryClient.invalidateQueries({ queryKey: ['file-tree', currentWorkspace.id] });
+          }
+        }
+        break;
+      }
+      case 'tool_error': {
+        const { toolCallId, error } = event.data as { toolCallId: string; error: string };
+        const tc = toolCallMap.get(toolCallId);
+        if (tc) {
+          tc.status = 'error';
+          tc.error = error;
+          toolCallMap.set(toolCallId, tc);
+          setActiveMsgToolCalls(new Map(toolCallMap));
+        }
+        break;
+      }
     }
   }
 
@@ -188,6 +258,8 @@ export function ChatPanel() {
     waiting: 'bg-orange-400 animate-pulse',
   }[agentStatus] ?? 'bg-muted-foreground/40';
 
+  const activeToolCalls = Array.from(activeMsgToolCalls.values());
+
   return (
     <div className="flex flex-col h-full bg-[#161616] border-l border-[#393939]">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -202,7 +274,9 @@ export function ChatPanel() {
               <div className={cn('w-2 h-2 rounded-full', statusDot)} />
             </div>
             <span className="text-[10px] text-[#8d8d8d] leading-none">
-              {agentStatus === 'idle' ? 'IBM Orchestrate' : agentStatus}
+              {agentStatus === 'idle'
+                ? currentWorkspace ? `${currentWorkspace.name}` : 'No workspace open'
+                : agentStatus}
             </span>
           </div>
         </div>
@@ -214,7 +288,7 @@ export function ChatPanel() {
               className="flex items-center gap-1 text-[10px] text-[#4589ff] mr-1"
             >
               <Sparkles className="h-3 w-3" />
-              <span>Thinking…</span>
+              <span>Working…</span>
             </motion.div>
           )}
           <button
@@ -226,6 +300,26 @@ export function ChatPanel() {
           </button>
         </div>
       </div>
+
+      {/* ── No workspace warning ──────────────────────────────────────────── */}
+      {!currentWorkspace && (
+        <div className="mx-3 mt-3 px-3 py-2 bg-[#f1c21b]/10 border border-[#f1c21b]/30 rounded-lg flex items-start gap-2">
+          <AlertCircle className="h-3.5 w-3.5 text-[#f1c21b] shrink-0 mt-0.5" />
+          <p className="text-[11px] text-[#f1c21b] leading-relaxed">
+            Open a workspace so the agent can read, write, and run code. Go to the{' '}
+            <a href="/workspace" className="underline underline-offset-2">Workspaces</a> page.
+          </p>
+        </div>
+      )}
+
+      {/* ── Active tool calls (live) ──────────────────────────────────────── */}
+      {activeToolCalls.length > 0 && (
+        <div className="mx-3 mt-2 space-y-1">
+          {activeToolCalls.map((tc) => (
+            <ToolCallBadge key={tc.id} tool={tc} />
+          ))}
+        </div>
+      )}
 
       {/* ── Messages ──────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
@@ -251,10 +345,14 @@ export function ChatPanel() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask the IBM agent to write, edit, or explain code…"
+            placeholder={
+              currentWorkspace
+                ? 'Ask the agent to write, edit, run, or explain code…'
+                : 'Open a workspace to start coding with the agent…'
+            }
             rows={3}
-            disabled={isStreaming}
-            className="w-full p-3 bg-transparent text-sm text-white resize-none focus:outline-none placeholder:text-[#6f6f6f] disabled:opacity-50"
+            disabled={isStreaming || !currentWorkspace}
+            className="w-full p-3 bg-transparent text-sm text-white resize-none focus:outline-none placeholder:text-[#6f6f6f] disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <div className="flex items-center justify-between px-3 py-2 bg-[#1e1e1e]/60 border-t border-[#393939]">
             <div className="flex items-center gap-2 text-xs text-[#8d8d8d]">
@@ -275,7 +373,7 @@ export function ChatPanel() {
               ) : (
                 <button
                   onClick={() => void handleSubmit()}
-                  disabled={!input.trim()}
+                  disabled={!input.trim() || !currentWorkspace}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0f62fe] text-white rounded-lg text-xs hover:bg-[#0353e9] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Send className="h-3.5 w-3.5" />
@@ -286,6 +384,71 @@ export function ChatPanel() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Tool Call Badge (live indicator) ──────────────────────────────────────────
+
+function ToolCallBadge({ tool }: { tool: ToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const icons: Record<string, React.ReactNode> = {
+    write_file: <FileCode className="h-3 w-3" />,
+    create_file: <FileCode className="h-3 w-3" />,
+    read_file: <FileCode className="h-3 w-3" />,
+    terminal: <TermIcon className="h-3 w-3" />,
+    execute_command: <TermIcon className="h-3 w-3" />,
+  };
+
+  const statusColors = {
+    running: 'border-[#4589ff]/40 bg-[#0f62fe]/10 text-[#4589ff]',
+    done: 'border-[#24a148]/40 bg-[#24a148]/10 text-[#24a148]',
+    error: 'border-[#da1e28]/40 bg-[#da1e28]/10 text-[#ff8389]',
+  };
+
+  return (
+    <div className={cn('rounded-lg border text-xs overflow-hidden', statusColors[tool.status])}>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="flex items-center gap-2 w-full px-3 py-1.5 text-left"
+      >
+        {tool.status === 'running' ? (
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+        ) : tool.status === 'done' ? (
+          <CheckCircle2 className="h-3 w-3 shrink-0" />
+        ) : (
+          <XCircle className="h-3 w-3 shrink-0" />
+        )}
+        <Wrench className="h-3 w-3 shrink-0 opacity-60" />
+        {icons[tool.name] ?? <Wrench className="h-3 w-3 shrink-0" />}
+        <span className="font-mono">{tool.name}</span>
+        {tool.duration && <span className="ml-auto opacity-60">{tool.duration}ms</span>}
+        {expanded ? <ChevronDown className="h-3 w-3 ml-1 shrink-0" /> : <ChevronRight className="h-3 w-3 ml-1 shrink-0" />}
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 space-y-1.5 bg-[#161616]/60">
+          {Object.keys(tool.args).length > 0 && (
+            <div>
+              <p className="text-[10px] opacity-60 mb-0.5">Arguments</p>
+              <pre className="text-[10px] font-mono opacity-80 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+                {JSON.stringify(tool.args, null, 2)}
+              </pre>
+            </div>
+          )}
+          {tool.output && (
+            <div>
+              <p className="text-[10px] opacity-60 mb-0.5">Output</p>
+              <pre className="text-[10px] font-mono opacity-80 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+                {tool.output}
+              </pre>
+            </div>
+          )}
+          {tool.error && (
+            <p className="text-[10px] text-[#ff8389]">{tool.error}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -398,21 +561,23 @@ function WelcomeMessage({
       <p className="text-xs text-[#a8a8a8] max-w-[220px] leading-relaxed">
         {workspaceName
           ? `Ready to help with ${workspaceName}. Ask me to write code, fix bugs, run tests, or explain anything.`
-          : 'Ask me to write code, fix bugs, explain architecture, or help with any engineering task.'}
+          : 'Open a workspace to start. The agent will read, write, and run code directly in your project.'}
       </p>
 
-      <div className="grid grid-cols-1 gap-1.5 w-full mt-1">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s.label}
-            onClick={() => onSuggestion(s.prompt)}
-            className="text-left text-xs px-3 py-2 rounded-lg border border-[#393939] hover:border-[#0f62fe]/50 hover:bg-[#0f62fe]/10 transition-all text-[#8d8d8d] hover:text-white"
-          >
-            <span className="mr-2">{s.icon}</span>
-            {s.label}
-          </button>
-        ))}
-      </div>
+      {workspaceName && (
+        <div className="grid grid-cols-1 gap-1.5 w-full mt-1">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s.label}
+              onClick={() => onSuggestion(s.prompt)}
+              className="text-left text-xs px-3 py-2 rounded-lg border border-[#393939] hover:border-[#0f62fe]/50 hover:bg-[#0f62fe]/10 transition-all text-[#8d8d8d] hover:text-white"
+            >
+              <span className="mr-2">{s.icon}</span>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -11,4 +11,38 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Inject JWT token from Zustand auth store on every request
+apiClient.interceptors.request.use((config) => {
+  // Dynamically import to avoid SSR issues
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('ibm-agent-auth');
+      if (raw) {
+        const parsed = JSON.parse(raw) as { state?: { accessToken?: string } };
+        const token = parsed?.state?.accessToken;
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      }
+    } catch {
+      // ignore JSON parse errors
+    }
+  }
+  return config;
+});
+
+// Handle 401 — clear auth and redirect to login
+apiClient.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err?.response?.status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem('ibm-agent-auth');
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(err);
+  },
+);
+
 export default apiClient;

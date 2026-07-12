@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { io, Socket } from 'socket.io-client';
 import 'xterm/css/xterm.css';
 
@@ -11,81 +12,137 @@ interface IntegratedTerminalProps {
 }
 
 export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+
+  const fitTerminal = useCallback(() => {
+    try {
+      if (
+        containerRef.current &&
+        containerRef.current.clientWidth > 0 &&
+        containerRef.current.clientHeight > 0 &&
+        fitAddonRef.current
+      ) {
+        fitAddonRef.current.fit();
+        // Notify backend about resize
+        if (socketRef.current && termRef.current) {
+          socketRef.current.emit('resize', {
+            cols: termRef.current.cols,
+            rows: termRef.current.rows,
+          });
+        }
+      }
+    } catch {
+      // Ignore fit errors
+    }
+  }, []);
 
   useEffect(() => {
-    if (!terminalRef.current) return;
+    if (!containerRef.current) return;
 
-    // Initialize xterm.js
+    // ── Initialize xterm.js ────────────────────────────────────────────────
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: 'Consolas, "Courier New", monospace',
-      fontSize: 14,
+      fontFamily: "'IBM Plex Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+      fontSize: 13,
+      lineHeight: 1.4,
       theme: {
-        background: '#1e1e1e',
-        foreground: '#cccccc',
-        cursor: '#ffffff',
+        background: '#0e0e0e',
+        foreground: '#f4f4f4',
+        cursor: '#4589ff',
+        cursorAccent: '#0e0e0e',
+        black: '#262626',
+        red: '#ff8389',
+        green: '#42be65',
+        yellow: '#f1c21b',
+        blue: '#4589ff',
+        magenta: '#be95ff',
+        cyan: '#08bdba',
+        white: '#f4f4f4',
+        brightBlack: '#525252',
+        brightRed: '#ff8389',
+        brightGreen: '#42be65',
+        brightYellow: '#f1c21b',
+        brightBlue: '#4589ff',
+        brightMagenta: '#be95ff',
+        brightCyan: '#08bdba',
+        brightWhite: '#ffffff',
+        selectionBackground: '#0f62fe40',
       },
+      allowTransparency: true,
+      scrollback: 1000,
+      convertEol: true,
     });
+
+    termRef.current = term;
 
     const fitAddon = new FitAddon();
+    fitAddonRef.current = fitAddon;
     term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-    
-    const safeFit = () => {
-      try {
-        if (terminalRef.current && terminalRef.current.clientWidth > 0 && terminalRef.current.clientHeight > 0) {
-          fitAddon.fit();
-        }
-      } catch (e) {
-        // Ignore fit errors if dimensions are unavailable
-      }
-    };
+    term.loadAddon(new WebLinksAddon());
+    term.open(containerRef.current);
 
-    // Fit the terminal after a small delay to ensure container is rendered
-    setTimeout(() => safeFit(), 100);
+    // Fit after DOM settles
+    setTimeout(fitTerminal, 150);
 
-    // Handle window resize
-    const handleResize = () => safeFit();
-    window.addEventListener('resize', handleResize);
-
-    // Initialize Socket.io connection to backend terminal namespace
+    // ── Socket.io connection ──────────────────────────────────────────────
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-    const newSocket = io(`${baseUrl}/terminal`);
-    setSocket(newSocket);
+    const socket = io(`${baseUrl}/terminal`, {
+      transports: ['websocket'],
+      reconnectionAttempts: 5,
+    });
+    socketRef.current = socket;
 
-    newSocket.on('connect', () => {
-      term.writeln('\\r\\n[Connected to local terminal]\\r\\n');
-      newSocket.emit('init', { workspacePath });
+    socket.on('connect', () => {
+      term.writeln('\r\n\x1b[32m[Connected to terminal]\x1b[0m\r\n');
+      socket.emit('init', { workspacePath });
+      fitTerminal();
     });
 
-    newSocket.on('data', (data: string) => {
+    socket.on('data', (data: string) => {
       term.write(data);
     });
 
-    newSocket.on('disconnect', () => {
-      term.writeln('\\r\\n[Terminal disconnected]\\r\\n');
+    socket.on('disconnect', () => {
+      term.writeln('\r\n\x1b[33m[Terminal disconnected. Reconnecting...]\x1b[0m\r\n');
+    });
+
+    socket.on('connect_error', () => {
+      term.writeln('\r\n\x1b[31m[Cannot connect to terminal backend. Make sure the API is running.]\x1b[0m\r\n');
     });
 
     // Send user input to backend
     term.onData((data) => {
-      newSocket.emit('data', data);
+      socket.emit('data', data);
     });
 
+    // ── Resize observer ────────────────────────────────────────────────────
+    const resizeObserver = new ResizeObserver(() => {
+      fitTerminal();
+    });
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    window.addEventListener('resize', fitTerminal);
+
     return () => {
-      window.removeEventListener('resize', handleResize);
-      newSocket.disconnect();
+      window.removeEventListener('resize', fitTerminal);
+      resizeObserver.disconnect();
+      socket.disconnect();
       term.dispose();
     };
-  }, [workspacePath]);
+  }, [workspacePath, fitTerminal]);
 
   return (
-    <div className="w-full h-full bg-[#1e1e1e] p-2 overflow-hidden flex flex-col">
-      <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-2 flex items-center gap-2">
-        <span>Terminal</span>
-      </div>
-      <div ref={terminalRef} className="flex-1 w-full h-full overflow-hidden" />
+    <div className="w-full h-full bg-[#0e0e0e] overflow-hidden">
+      <div
+        ref={containerRef}
+        className="w-full h-full p-1"
+        style={{ minHeight: 0 }}
+      />
     </div>
   );
 }

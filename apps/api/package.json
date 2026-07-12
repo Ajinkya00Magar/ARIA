@@ -10,8 +10,7 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts",
-    "postinstall": "cd ../.. && npx turbo run build --filter=@ibm-agent/api^..."
+    "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@ibm-agent/ai": "*",
@@ -33,6 +32,7 @@
     "ibm-cloud-sdk-core": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "node-pty": "^1.1.0",
     "pino": "^9.5.0",
     "pino-http": "^10.3.0",
     "socket.io": "^4.8.3",

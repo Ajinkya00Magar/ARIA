@@ -153,24 +153,14 @@ class AgentService {
       });
     } else {
       // ── watsonx CodingAgent Fallback ─────────────────────────────────────
-      if (!ws) {
-        // No workspace — do a simple text generation
-        await this.runSimpleWatsonxChat(opts, chatHistory, finalContent);
-        return;
-      }
-
-      const projectSummary = ws.projectSummary as ProjectSummary | null;
-
-      if (!executor) {
-        throw new Error('Workspace required for coding agent tasks');
-      }
+      const projectSummary = ws?.projectSummary as ProjectSummary | null;
 
       await this.agent.run({
-        workspaceId: opts.workspaceId,
+        workspaceId: opts.workspaceId || 'ephemeral',
         userId: opts.userId,
         chatHistory: chatHistory.slice(0, -1),
         userMessage: opts.userMessage,
-        projectSummary,
+        projectSummary: projectSummary ?? null,
         memories: [],
         onEvent: (event) => {
           opts.onEvent(event);
@@ -179,6 +169,9 @@ class AgentService {
           }
         },
         executeToolFn: async (toolName: ToolName, args, _workspaceId) => {
+          if (!executor) {
+            return `Tool "${toolName}" requires an open workspace. Please open a workspace and try again.`;
+          }
           return executor.execute(toolName, args);
         },
         requestPermissionFn: async (action, description, details) => {
