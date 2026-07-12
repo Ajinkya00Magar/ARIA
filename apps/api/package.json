@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "postinstall": "cd ../.. && npx turbo run build --filter=@ibm-agent/api^..."
   },
   "dependencies": {
     "@ibm-agent/ai": "*",
