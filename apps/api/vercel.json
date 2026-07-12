@@ -17,14 +17,6 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "IBM_CLOUD_API_KEY": "@ibm_cloud_api_key",
-    "IBM_PROJECT_ID": "@ibm_project_id",
-    "IBM_WATSONX_URL": "@ibm_watsonx_url",
-    "IBM_MODEL_ID": "@ibm_model_id",
-    "DATABASE_URL": "@database_url",
-    "JWT_SECRET": "@jwt_secret",
-    "JWT_REFRESH_SECRET": "@jwt_refresh_secret",
-    "ALLOWED_ORIGINS": "@allowed_origins",
     "WORKSPACE_ROOT": "/tmp/ibm-agent-workspaces"
   }
 }
