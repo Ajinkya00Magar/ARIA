@@ -121,42 +121,28 @@ class AgentService {
     }));
 
     // ── Choose agent backend ───────────────────────────────────────────────
+    // KEY ROUTING RULE:
+    // • When a workspace is open → ALWAYS use local CodingAgent + ToolExecutor.
+    //   This is the only path that can actually write files, run commands, etc.
+    //   IBM Orchestrate is a remote cloud LLM — it cannot call our local file tools.
+    // • When NO workspace is open → use IBM Orchestrate (if configured) for Q&A,
+    //   otherwise fall back to local watsonx CodingAgent.
     let finalContent = '';
 
-    const executor = ws ? new ToolExecutor(ws.path, async (cmd) => {
-      return permissionService.request(opts.pendingPermissions, cmd, 'terminal', { command: cmd });
-    }) : undefined;
+    const executor = ws
+      ? new ToolExecutor(ws.path, async (cmd) => {
+          return permissionService.request(opts.pendingPermissions, cmd, 'terminal', { command: cmd });
+        })
+      : undefined;
 
-    if (this.orchestrate) {
-      // ── IBM Orchestrate Path ─────────────────────────────────────────────
-      await this.orchestrate.run({
-        userMessage: opts.userMessage,
-        chatHistory: chatHistory.slice(0, -1).map((m) => ({
-          role: m.role as 'user' | 'assistant' | 'system',
-          content: m.content,
-        })),
-        workspaceId: opts.workspaceId,
-        systemPrompt: ws
-          ? `You are an expert IBM Coding Agent. The user is working in workspace: ${opts.workspaceId}. Help them with coding tasks.`
-          : 'You are an expert IBM Coding Agent. Help the user with any coding, architecture, or software engineering task.',
-        executeToolFn: executor ? (name, args) => executor.execute(name, args) : undefined,
-        onEvent: (event) => {
-          opts.onEvent(event);
-          if (event.type === 'content_done') {
-            finalContent = (event.data as { content: string }).content;
-          }
-          // Accumulate delta for saving
-          if (event.type === 'content_delta') {
-            finalContent += (event.data as { delta: string }).delta;
-          }
-        },
-      });
-    } else {
-      // ── watsonx CodingAgent Fallback ─────────────────────────────────────
-      const projectSummary = ws?.projectSummary as ProjectSummary | null;
+    if (ws && executor) {
+      // ── LOCAL CodingAgent with real ToolExecutor (workspace open) ─────────
+      // This is the ONLY path that actually creates files, runs commands, etc.
+      const projectSummary = ws.projectSummary as ProjectSummary | null;
+      logger.info(`⚡ Running local CodingAgent for workspace: ${ws.path}`);
 
       await this.agent.run({
-        workspaceId: opts.workspaceId || 'ephemeral',
+        workspaceId: opts.workspaceId,
         userId: opts.userId,
         chatHistory: chatHistory.slice(0, -1),
         userMessage: opts.userMessage,
@@ -167,18 +153,66 @@ class AgentService {
           if (event.type === 'content_done') {
             finalContent = (event.data as { content: string }).content;
           }
+          if (event.type === 'content_delta') {
+            finalContent += (event.data as { delta: string }).delta;
+          }
         },
         executeToolFn: async (toolName: ToolName, args, _workspaceId) => {
-          if (!executor) {
-            return `Tool "${toolName}" requires an open workspace. Please open a workspace and try again.`;
-          }
           return executor.execute(toolName, args);
         },
         requestPermissionFn: async (action, description, details) => {
           return permissionService.request(opts.pendingPermissions, action, description, details);
         },
       });
+    } else if (this.orchestrate) {
+      // ── IBM Orchestrate — no workspace, Q&A only ───────────────────────────
+      logger.info('🤖 Routing to IBM Orchestrate (no workspace — Q&A mode)');
+      await this.orchestrate.run({
+        userMessage: opts.userMessage,
+        chatHistory: chatHistory.slice(0, -1).map((m) => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content,
+        })),
+        workspaceId: opts.workspaceId,
+        systemPrompt: 'You are an expert IBM Coding Agent. Help the user with any coding, architecture, or software engineering task. When the user wants to write or create files, remind them to open a workspace first.',
+        onEvent: (event) => {
+          opts.onEvent(event);
+          if (event.type === 'content_done') {
+            finalContent = (event.data as { content: string }).content;
+          }
+          if (event.type === 'content_delta') {
+            finalContent += (event.data as { delta: string }).delta;
+          }
+        },
+      });
+    } else {
+      // ── Local watsonx — no workspace, no Orchestrate ───────────────────────
+      logger.info('⚡ Running local CodingAgent (no workspace — watsonx Q&A)');
+      await this.agent.run({
+        workspaceId: 'ephemeral',
+        userId: opts.userId,
+        chatHistory: chatHistory.slice(0, -1),
+        userMessage: opts.userMessage,
+        projectSummary: null,
+        memories: [],
+        onEvent: (event) => {
+          opts.onEvent(event);
+          if (event.type === 'content_done') {
+            finalContent = (event.data as { content: string }).content;
+          }
+          if (event.type === 'content_delta') {
+            finalContent += (event.data as { delta: string }).delta;
+          }
+        },
+        executeToolFn: async (toolName: ToolName, _args, _workspaceId) => {
+          return `Tool "${toolName}" requires an open workspace. Please open a workspace first.`;
+        },
+        requestPermissionFn: async (action, description, details) => {
+          return permissionService.request(opts.pendingPermissions, action, description, details);
+        },
+      });
     }
+
 
     // ── Save assistant response (only when workspace exists) ──────────────
     const savedContent = finalContent.trim();
