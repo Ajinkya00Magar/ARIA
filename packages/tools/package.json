@@ -1,0 +1,29 @@
+{
+  "name": "@ibm-agent/tools",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@ibm-agent/types": "*",
+    "@ibm-agent/shared": "*",
+    "fast-glob": "^3.3.2",
+    "simple-git": "^3.27.0",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.0"
+  }
+}

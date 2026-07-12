@@ -1,0 +1,97 @@
+import { useState, useCallback, useRef } from 'react';
+import type { AgentEvent } from '@ibm-agent/types';
+
+// Let's use apiClient if it handles SSE, but fetch is better for SSE reading the stream.
+
+export function useAgentStream() {
+  const [isStreaming, setIsStreaming] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const stream = useCallback(async (
+    params: { chatId: string; content: string; workspaceId: string },
+    onEvent: (event: AgentEvent) => void
+  ): Promise<string | void> => {
+    setIsStreaming(true);
+    abortControllerRef.current = new AbortController();
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+
+    try {
+      // Need to pass token if authenticating
+      // This is a simple implementation, you might need to grab token from next-auth/zustand
+      const token = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('next-auth.session-token='))
+        ?.split('=')[1] ?? ''; // simplistic token retrieval, adjust if using other auth strategy
+
+      const response = await fetch(`${baseUrl}/agent/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(params),
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Stream error: ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        
+        buffer = lines.pop() || ''; // Keep the incomplete line in the buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6);
+            if (dataStr === '[DONE]') {
+              return params.chatId; // Or whatever is returned on finish
+            }
+            try {
+              const eventData = JSON.parse(dataStr);
+              if (eventData.type === 'stream_end') {
+                setIsStreaming(false);
+                return params.chatId;
+              }
+              onEvent(eventData as AgentEvent);
+            } catch (e) {
+              console.warn('Failed to parse SSE JSON:', dataStr, e);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log('Stream aborted');
+      } else {
+        throw err;
+      }
+    } finally {
+      setIsStreaming(false);
+      abortControllerRef.current = null;
+    }
+  }, []);
+
+  const abort = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  }, []);
+
+  return { stream, isStreaming, abort };
+}

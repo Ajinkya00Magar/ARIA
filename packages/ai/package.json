@@ -1,0 +1,29 @@
+{
+  "name": "@ibm-agent/ai",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ibm-agent/types": "*",
+    "@ibm-agent/shared": "*",
+    "axios": "^1.7.9",
+    "eventsource-parser": "^2.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.0"
+  }
+}

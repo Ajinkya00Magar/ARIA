@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "paths": {
+      "@ibm-agent/types": ["../types/src"],
+      "@ibm-agent/shared": ["../shared/src"]
+    }
+  },
+  "references": [
+    { "path": "../types" },
+    { "path": "../shared" }
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

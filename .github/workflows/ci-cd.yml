@@ -1,0 +1,225 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub Actions — CI/CD Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: IBM Coding Agent CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: us.icr.io
+  NAMESPACE: ibm-coding-agent
+  API_IMAGE: ibm-coding-agent-api
+  WEB_IMAGE: ibm-coding-agent-web
+
+jobs:
+  # ── Lint & TypeCheck ────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+  # ── Tests ──────────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: ibm_coding_agent_test
+          POSTGRES_USER: ibmagent
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages
+        run: npm run build --workspace=packages/types --workspace=packages/shared
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://ibmagent:test_password@localhost:5432/ibm_coding_agent_test
+          JWT_SECRET: test_jwt_secret_at_least_32_chars_long_abc
+          JWT_REFRESH_SECRET: test_refresh_secret_at_least_32_chars_abc
+          IBM_CLOUD_API_KEY: test-key
+          IBM_PROJECT_ID: test-project
+          IBM_WATSONX_URL: https://us-south.ml.cloud.ibm.com
+          NODE_ENV: test
+        run: npm test --workspace=apps/api -- --passWithNoTests
+
+  # ── Build Docker Images ────────────────────────────────────────────────────
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install IBM Cloud CLI
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud plugin install container-registry -f
+          ibmcloud plugin install code-engine -f
+
+      - name: IBM Cloud Login
+        env:
+          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+        run: |
+          ibmcloud login --apikey $IBM_CLOUD_API_KEY -r us-south
+          ibmcloud cr login
+          ibmcloud cr region-set us-south
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Get image tags
+        id: tags
+        run: |
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          BRANCH=${GITHUB_REF_NAME//\//-}
+          echo "sha=${SHA_SHORT}" >> $GITHUB_OUTPUT
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            echo "latest=true" >> $GITHUB_OUTPUT
+          else
+            echo "latest=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.API_IMAGE }}:${{ steps.tags.outputs.sha }}
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.API_IMAGE }}:${{ steps.tags.outputs.branch }}
+            ${{ steps.tags.outputs.latest == 'true' && format('{0}/{1}/{2}:latest', env.REGISTRY, env.NAMESPACE, env.API_IMAGE) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.web
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.WEB_IMAGE }}:${{ steps.tags.outputs.sha }}
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.WEB_IMAGE }}:${{ steps.tags.outputs.branch }}
+            ${{ steps.tags.outputs.latest == 'true' && format('{0}/{1}/{2}:latest', env.REGISTRY, env.NAMESPACE, env.WEB_IMAGE) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Deploy to IBM Code Engine ───────────────────────────────────────────────
+  deploy:
+    name: Deploy to IBM Code Engine
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install IBM Cloud CLI
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud plugin install code-engine -f
+
+      - name: IBM Cloud Login
+        env:
+          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+        run: |
+          ibmcloud login --apikey $IBM_CLOUD_API_KEY -r us-south -g Default
+          ibmcloud ce project select --name ibm-coding-agent
+
+      - name: Deploy API
+        env:
+          SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          ibmcloud ce application update \
+            --name ibm-coding-agent-api \
+            --image ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.API_IMAGE }}:latest \
+            --env-from-secret ibm-agent-secrets \
+            --min-scale 1 \
+            --max-scale 5 \
+            --cpu 1 \
+            --memory 2G \
+            --port 3001 || \
+          ibmcloud ce application create \
+            --name ibm-coding-agent-api \
+            --image ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.API_IMAGE }}:latest \
+            --env-from-secret ibm-agent-secrets \
+            --min-scale 1 \
+            --max-scale 5 \
+            --cpu 1 \
+            --memory 2G \
+            --port 3001
+
+      - name: Deploy Web
+        run: |
+          ibmcloud ce application update \
+            --name ibm-coding-agent-web \
+            --image ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.WEB_IMAGE }}:latest \
+            --env-from-secret ibm-agent-web-secrets \
+            --min-scale 1 \
+            --max-scale 3 \
+            --cpu 0.5 \
+            --memory 1G \
+            --port 3000 || \
+          ibmcloud ce application create \
+            --name ibm-coding-agent-web \
+            --image ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.WEB_IMAGE }}:latest \
+            --env-from-secret ibm-agent-web-secrets \
+            --min-scale 1 \
+            --max-scale 3 \
+            --cpu 0.5 \
+            --memory 1G \
+            --port 3000
+
+      - name: Verify deployment
+        run: |
+          echo "✅ Deployment complete"
+          ibmcloud ce application list | grep ibm-coding-agent
