@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send, Square, RotateCcw, Sparkles, Plus, Bot, User,
@@ -307,7 +308,7 @@ export function ChatPanel() {
           <AlertCircle className="h-3.5 w-3.5 text-[#f1c21b] shrink-0 mt-0.5" />
           <p className="text-[11px] text-[#f1c21b] leading-relaxed">
             Open a workspace so the agent can read, write, and run code. Go to the{' '}
-            <a href="/workspace" className="underline underline-offset-2">Workspaces</a> page.
+            <Link href="/workspace" className="underline underline-offset-2">Workspaces</Link> page.
           </p>
         </div>
       )}
