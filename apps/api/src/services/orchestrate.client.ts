@@ -105,16 +105,34 @@ export class OrchestrateClient {
     // Start with the initial user message if not already in history
     chatHistory.push({ role: 'user', content: opts.userMessage });
 
+    const cleanOrchestrateMessages = (msgs: any[]): any[] => {
+      const result: any[] = [];
+      for (const msg of msgs) {
+        const prev = result[result.length - 1];
+        if (prev && prev.role === msg.role && msg.role !== 'tool') {
+          prev.content = (prev.content || '') + '\n\n' + (msg.content || '');
+          if (msg.tool_calls) {
+            prev.tool_calls = [...(prev.tool_calls || []), ...msg.tool_calls];
+          }
+        } else {
+          result.push({ ...msg });
+        }
+      }
+      return result;
+    };
+
     while (iterations < maxIterations) {
       iterations++;
       
+      const rawMessages = [
+        ...(opts.systemPrompt
+          ? [{ role: 'system', content: opts.systemPrompt }]
+          : []),
+        ...chatHistory,
+      ];
+      
       const body: any = {
-        messages: [
-          ...(opts.systemPrompt
-            ? [{ role: 'system', content: opts.systemPrompt }]
-            : []),
-          ...chatHistory,
-        ],
+        messages: cleanOrchestrateMessages(rawMessages),
         stream: true,
       };
 

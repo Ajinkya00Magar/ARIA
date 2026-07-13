@@ -54,6 +54,22 @@ function emit(onEvent: (e: AgentEvent) => void, type: AgentEventType, data: Agen
   onEvent({ type, id: generateId(), data, timestamp: new Date() });
 }
 
+function cleanMessages(messages: WatsonxMessage[]): WatsonxMessage[] {
+  const result: WatsonxMessage[] = [];
+  for (const msg of messages) {
+    const prev = result[result.length - 1];
+    if (prev && prev.role === msg.role && msg.role !== 'tool') {
+      prev.content = (prev.content || '') + '\n\n' + (msg.content || '');
+      if (msg.toolCalls) {
+        prev.toolCalls = [...(prev.toolCalls || []), ...msg.toolCalls];
+      }
+    } else {
+      result.push({ ...msg });
+    }
+  }
+  return result;
+}
+
 export class CodingAgent {
   constructor(private readonly watsonx: WatsonxClient) {}
 
@@ -77,14 +93,17 @@ export class CodingAgent {
     // Build conversation messages for watsonx
     const systemPrompt = buildSystemPrompt(projectSummary, memories);
 
-    const messages: WatsonxMessage[] = [
+    const rawMessages: WatsonxMessage[] = [
       { role: 'system', content: systemPrompt },
       ...chatHistory.slice(-20).map((m): WatsonxMessage => ({
         role: m.role === 'tool' ? 'tool' : (m.role as WatsonxMessage['role']),
         content: m.content,
+        toolCalls: m.toolCalls as never,
       })),
       { role: 'user', content: userMessage },
     ];
+
+    const messages = cleanMessages(rawMessages);
 
     let iteration = 0;
     let finalContent = '';
