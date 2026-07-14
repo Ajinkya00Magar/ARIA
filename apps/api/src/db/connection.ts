@@ -15,8 +15,10 @@ let sqlite: Database.Database | null = null;
 let db: BetterSQLite3Database<typeof schema> | null = null;
 
 export async function connectDatabase(): Promise<void> {
-  const dbPath = path.resolve(process.cwd(), 'local.db');
-  
+  const isVercel = process.env.VERCEL === '1';
+  const dbPath = isVercel 
+    ? path.join('/tmp', 'local.db')
+    : path.resolve(process.cwd(), 'local.db');
   sqlite = new Database(dbPath, {
     verbose: (message) => logger.debug(message),
   });
