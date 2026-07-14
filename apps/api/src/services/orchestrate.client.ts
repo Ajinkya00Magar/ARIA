@@ -1,7 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// IBM Orchestrate Agent Client
-// Connects to an IBM Orchestrate agent endpoint and converts its responses
-// to the internal AgentEvent streaming format.
+// IBM watsonx Orchestrate Client
+// Primary agent execution layer for ARIA
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { AgentEvent, ToolCall } from '@ibm-agent/types';
@@ -11,7 +10,7 @@ export interface OrchestrateMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   name?: string;
-  tool_calls?: any[];
+  tool_calls?: unknown[];
   tool_call_id?: string;
 }
 
@@ -20,32 +19,32 @@ export interface OrchestrateRunOptions {
   chatHistory: OrchestrateMessage[];
   workspaceId?: string;
   systemPrompt?: string;
+  runId?: string;
   onEvent: (event: AgentEvent) => void;
-  executeToolFn?: (toolName: any, args: any) => Promise<string>;
+  executeToolFn?: (toolName: string, args: Record<string, unknown>) => Promise<string>;
+  requestPermissionFn?: (action: string, description: string, details: Record<string, unknown>) => Promise<boolean>;
 }
 
 export interface OrchestrateConfig {
-  /** Base URL of your IBM Orchestrate agent endpoint (e.g. https://your-org.orchestrate.ibm.com/instances/ID/agent/run) */
   agentUrl: string;
-  /** API key for authenticating with the Orchestrate agent */
   apiKey: string;
-  /** Optional IBM Cloud bearer token — takes precedence over apiKey if set */
   bearerToken?: string;
-  /** Timeout in ms (default: 120000) */
   timeoutMs?: number;
 }
 
 /**
- * Lightweight client for IBM Orchestrate agents.
+ * IBM watsonx Orchestrate Agent Client — ARIA's primary intelligence layer
  *
- * Handles two response modes:
- *   1. Streaming SSE  — if the endpoint returns text/event-stream
- *   2. JSON REST      — if the endpoint returns application/json
- *
- * In both cases the output is mapped to AgentEvent objects and fired via onEvent.
+ * Handles:
+ *   • IAM token acquisition and refresh
+ *   • SSE streaming (text/event-stream)
+ *   • JSON REST fallback (application/json)
+ *   • Tool call execution loop (IBM Orchestrate requests → local tool execution)
+ *   • Structured error mapping
  */
 export class OrchestrateClient {
-  private readonly config: Required<OrchestrateConfig>;
+  private config: Required<OrchestrateConfig>;
+  private tokenExpiresAt: number = 0;
 
   constructor(config: OrchestrateConfig) {
     this.config = {
@@ -56,93 +55,104 @@ export class OrchestrateClient {
     };
   }
 
+  // ── IAM Token Management ────────────────────────────────────────────────────
+
+  private async refreshIamToken(): Promise<void> {
+    if (!this.config.apiKey) return;
+    // Skip if token is still valid (5 min buffer)
+    if (this.config.bearerToken && Date.now() < this.tokenExpiresAt - 300_000) return;
+
+    const iamRes = await fetch('https://iam.cloud.ibm.com/identity/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=${this.config.apiKey}`,
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!iamRes.ok) {
+      const text = await iamRes.text().catch(() => iamRes.statusText);
+      throw new Error(`IBM_AUTH_ERROR: IAM token acquisition failed (${iamRes.status}): ${text}`);
+    }
+
+    const data = (await iamRes.json()) as { access_token: string; expires_in: number };
+    this.config.bearerToken = data.access_token;
+    this.tokenExpiresAt = Date.now() + data.expires_in * 1000;
+  }
+
   private get authHeaders(): Record<string, string> {
     if (this.config.bearerToken) {
       return { Authorization: `Bearer ${this.config.bearerToken}` };
     }
-    // Fallback just in case, but we should always have a bearer token now
-    return { 'X-API-Key': this.config.apiKey };
+    // Fallback: treat apiKey as a bare bearer token (some Orchestrate setups)
+    return { Authorization: `Bearer ${this.config.apiKey}` };
   }
 
-  private async getIamToken(): Promise<string> {
-    if (!this.config.apiKey) return '';
-    const iamRes = await fetch("https://iam.cloud.ibm.com/identity/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=${this.config.apiKey}`
-    });
-    if (!iamRes.ok) {
-      throw new Error(`Failed to authenticate with IBM Cloud: ${iamRes.statusText}`);
-    }
-    const data = await iamRes.json() as any;
-    return data.access_token;
-  }
+  // ── Main Agent Loop ─────────────────────────────────────────────────────────
 
-  /**
-   * Run the Orchestrate agent and stream events back.
-   * Supports both SSE and plain JSON responses.
-   */
   async run(opts: OrchestrateRunOptions): Promise<void> {
-    if (!this.config.bearerToken && this.config.apiKey) {
-      this.config.bearerToken = await this.getIamToken();
+    const runId = opts.runId ?? 'run-' + Date.now();
+
+    // Acquire / refresh IAM token
+    try {
+      await this.refreshIamToken();
+    } catch (err) {
+      opts.onEvent({
+        type: 'agent_error',
+        data: { error: String(err), code: 'IBM_AUTH_ERROR' },
+        timestamp: new Date(),
+      });
+      throw err;
     }
 
     let iterations = 0;
     const maxIterations = 30;
-
     const chatHistory = [...opts.chatHistory];
-    
-    // Convert AgentTools to OpenAI function tools
-    const tools = AGENT_TOOLS.map(t => ({
-      type: 'function',
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters,
-      }
-    }));
 
-    // Start with the initial user message if not already in history
+    // Convert ARIA tool definitions to OpenAI-compatible function format
+    const tools = opts.executeToolFn
+      ? AGENT_TOOLS.map((t) => ({
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        }))
+      : [];
+
     chatHistory.push({ role: 'user', content: opts.userMessage });
 
-    const cleanOrchestrateMessages = (msgs: any[]): any[] => {
-      const result: any[] = [];
-      for (const msg of msgs) {
-        const prev = result[result.length - 1];
-        if (prev && prev.role === msg.role && msg.role !== 'tool') {
-          prev.content = (prev.content || '') + '\n\n' + (msg.content || '');
-          if (msg.tool_calls) {
-            prev.tool_calls = [...(prev.tool_calls || []), ...msg.tool_calls];
-          }
-        } else {
-          result.push({ ...msg });
-        }
-      }
-      return result;
-    };
+    opts.onEvent({
+      type: 'status_update',
+      data: { status: 'thinking', message: 'Connecting to IBM watsonx Orchestrate…' },
+      timestamp: new Date(),
+    });
 
     while (iterations < maxIterations) {
       iterations++;
-      
+
       const rawMessages = [
-        ...(opts.systemPrompt
-          ? [{ role: 'system', content: opts.systemPrompt }]
-          : []),
+        ...(opts.systemPrompt ? [{ role: 'system', content: opts.systemPrompt }] : []),
         ...chatHistory,
       ];
-      
-      const body: any = {
-        messages: cleanOrchestrateMessages(rawMessages),
+
+      const body: Record<string, unknown> = {
+        messages: cleanMessages(rawMessages as OrchestrateMessage[]),
         stream: true,
       };
 
-      if (opts.executeToolFn && tools.length > 0) {
+      if (tools.length > 0) {
         body.tools = tools;
         body.tool_choice = 'auto';
       }
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
+      const timeoutHandle = setTimeout(() => {
+        controller.abort();
+      }, this.config.timeoutMs);
+
+      let toolCalls: ToolCallAccumulator[] = [];
+      let assistantContent = '';
 
       try {
         const response = await fetch(this.config.agentUrl, {
@@ -150,6 +160,7 @@ export class OrchestrateClient {
           headers: {
             'Content-Type': 'application/json',
             Accept: 'text/event-stream, application/json',
+            'X-Request-ID': runId,
             ...this.authHeaders,
           },
           body: JSON.stringify(body),
@@ -158,81 +169,141 @@ export class OrchestrateClient {
 
         if (!response.ok) {
           const errText = await response.text().catch(() => response.statusText);
-          throw new Error(`Orchestrate agent HTTP ${response.status}: ${errText}`);
+          const code = mapHttpErrorCode(response.status);
+          opts.onEvent({
+            type: 'agent_error',
+            data: { error: `Orchestrate: ${errText}`, code },
+            timestamp: new Date(),
+          });
+          throw new Error(`${code}: HTTP ${response.status}: ${errText}`);
         }
 
         const contentType = response.headers.get('content-type') ?? '';
-        let toolCalls: any[] = [];
-        let assistantMessageContent = '';
 
-        const trackingOnEvent = (event: AgentEvent) => {
+        const trackEvent = (event: AgentEvent) => {
           opts.onEvent(event);
           if (event.type === 'content_delta') {
-            assistantMessageContent += (event.data as any).delta;
+            assistantContent += (event.data as { delta: string }).delta;
           } else if (event.type === 'content_done') {
-            assistantMessageContent = (event.data as any).content || assistantMessageContent;
+            assistantContent = (event.data as { content: string }).content || assistantContent;
           }
         };
 
         if (contentType.includes('text/event-stream')) {
-          toolCalls = await this.handleSSEStream(response, trackingOnEvent);
+          toolCalls = await this.handleSSEStream(response, trackEvent);
         } else {
-          const jsonRes = await this.handleJsonResponse(response, trackingOnEvent);
-          toolCalls = jsonRes.toolCalls;
+          const result = await this.handleJsonResponse(response, trackEvent);
+          toolCalls = result.toolCalls;
         }
-
-        // If there are no tool calls, we are done
-        if (!toolCalls || toolCalls.length === 0 || !opts.executeToolFn) {
-          break;
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') {
+          opts.onEvent({
+            type: 'agent_error',
+            data: { error: 'Request timed out', code: 'IBM_TIMEOUT' },
+            timestamp: new Date(),
+          });
         }
+        throw err;
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
 
-        // Add assistant's message with tool calls to history
-        chatHistory.push({
-          role: 'assistant',
-          content: assistantMessageContent,
-          tool_calls: toolCalls,
+      // No tool calls → agent has finished responding
+      if (!toolCalls.length || !opts.executeToolFn) {
+        opts.onEvent({
+          type: 'status_update',
+          data: { status: 'done' },
+          timestamp: new Date(),
+        });
+        break;
+      }
+
+      // Add assistant message with tool calls to conversation
+      chatHistory.push({
+        role: 'assistant',
+        content: assistantContent,
+        tool_calls: toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+        })),
+      });
+
+      // Execute each tool call locally
+      for (const tc of toolCalls) {
+        const callId = tc.id || generateCallId();
+
+        opts.onEvent({
+          type: 'tool_start',
+          data: {
+            toolCallId: callId,
+            toolName: tc.name as never,
+            arguments: tc.args,
+          },
+          timestamp: new Date(),
         });
 
-        // Execute tools
-        for (const tc of toolCalls) {
-          try {
-            const args = JSON.parse(tc.function.arguments);
-            const result = await opts.executeToolFn(tc.function.name, args);
-            chatHistory.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              name: tc.function.name,
-              content: result,
-            });
-          } catch (err) {
-            chatHistory.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              name: tc.function.name,
-              content: `Error: ${String(err)}`,
-            });
-          }
+        opts.onEvent({
+          type: 'status_update',
+          data: { status: 'executing', message: `Running ${tc.name}…` },
+          timestamp: new Date(),
+        });
+
+        const startMs = Date.now();
+        let output = '';
+
+        try {
+          output = await opts.executeToolFn(tc.name, tc.args);
+        } catch (err) {
+          output = `Error executing ${tc.name}: ${String(err)}`;
+          opts.onEvent({
+            type: 'tool_error',
+            data: { toolCallId: callId, toolName: tc.name as never, error: String(err) },
+            timestamp: new Date(),
+          });
         }
-      } finally {
-        clearTimeout(timeout);
+
+        const duration = Date.now() - startMs;
+
+        opts.onEvent({
+          type: 'tool_end',
+          data: {
+            toolCallId: callId,
+            toolName: tc.name as never,
+            output: output.slice(0, 4000),
+            duration,
+          },
+          timestamp: new Date(),
+        });
+
+        chatHistory.push({
+          role: 'tool',
+          tool_call_id: callId,
+          name: tc.name,
+          content: output.slice(0, 8000), // truncate to avoid context explosion
+        });
+
+        opts.onEvent({
+          type: 'status_update',
+          data: { status: 'thinking', message: 'Processing results…' },
+          timestamp: new Date(),
+        });
       }
     }
   }
 
-  // ── SSE Streaming ──────────────────────────────────────────────────────────
+  // ── SSE Streaming ───────────────────────────────────────────────────────────
 
   private async handleSSEStream(
     response: Response,
     onEvent: (event: AgentEvent) => void,
-  ): Promise<any[]> {
+  ): Promise<ToolCallAccumulator[]> {
     const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body reader available');
+    if (!reader) throw new Error('IBM_STREAM_ERROR: No response body reader');
 
     const decoder = new TextDecoder();
     let buffer = '';
-    const toolCallsBuffer = new Map<number, any>();
-
-    onEvent({ type: 'status_update', data: { status: 'thinking' }, timestamp: new Date() });
+    const toolBuffer = new Map<number, ToolCallAccumulator>();
 
     try {
       while (true) {
@@ -244,154 +315,191 @@ export class OrchestrateClient {
         buffer = lines.pop() ?? '';
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const raw = line.slice(6).trim();
-            if (!raw || raw === '[DONE]') continue;
-            this.parseAndEmit(raw, onEvent, toolCallsBuffer);
-          }
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (!raw || raw === '[DONE]') continue;
+          this.parseSSEChunk(raw, onEvent, toolBuffer);
         }
       }
     } finally {
       reader.releaseLock();
     }
-    
-    // Return accumulated tool calls
-    const toolCalls = Array.from(toolCallsBuffer.values());
+
+    const toolCalls = Array.from(toolBuffer.values());
     if (toolCalls.length === 0) {
-      onEvent({ type: 'status_update', data: { status: 'done' }, timestamp: new Date() });
+      onEvent({ type: 'content_done', data: { content: '' }, timestamp: new Date() });
     }
     return toolCalls;
   }
 
-  // ── JSON Response ──────────────────────────────────────────────────────────
+  // ── JSON Response ────────────────────────────────────────────────────────────
 
   private async handleJsonResponse(
     response: Response,
     onEvent: (event: AgentEvent) => void,
-  ): Promise<{ toolCalls: any[] }> {
-    const json = await response.json() as Record<string, unknown>;
+  ): Promise<{ toolCalls: ToolCallAccumulator[] }> {
+    const json = (await response.json()) as Record<string, unknown>;
+    const choices = json.choices as Array<{ message: { content?: string; tool_calls?: unknown[] } }> | undefined;
+    const toolCallsRaw = choices?.[0]?.message?.tool_calls ?? [];
 
-    // Check for tool calls in the JSON response
-    const choices = json.choices as any[];
-    const toolCalls = choices?.[0]?.message?.tool_calls || [];
-
-    // Extract the text content from common Orchestrate response shapes
     const content =
       (json.output as string) ??
       (json.text as string) ??
       (json.content as string) ??
-      (choices?.[0]?.message?.content) ??
+      choices?.[0]?.message?.content ??
       '';
 
-    onEvent({ type: 'status_update', data: { status: 'thinking' }, timestamp: new Date() });
-
-    // Simulate streaming for JSON responses — emit in chunks so the UI animates
     if (content) {
-      const chunkSize = 8;
+      // Stream content in chunks for smooth UI
+      const chunkSize = 12;
       for (let i = 0; i < content.length; i += chunkSize) {
-        const delta = content.slice(i, i + chunkSize);
-        onEvent({ type: 'content_delta', data: { delta }, timestamp: new Date() });
-        // small artificial delay for streaming effect
-        await new Promise((r) => setTimeout(r, 8));
+        onEvent({
+          type: 'content_delta',
+          data: { delta: content.slice(i, i + chunkSize) },
+          timestamp: new Date(),
+        });
+        await sleep(6);
       }
       onEvent({ type: 'content_done', data: { content }, timestamp: new Date() });
     }
 
-    if (toolCalls.length === 0) {
-      onEvent({ type: 'status_update', data: { status: 'done' }, timestamp: new Date() });
-    }
+    const toolCalls: ToolCallAccumulator[] = (toolCallsRaw as Array<{
+      id?: string;
+      function?: { name?: string; arguments?: string };
+    }>).map((tc) => {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(tc.function?.arguments ?? '{}') as Record<string, unknown>;
+      } catch {}
+      return { id: tc.id ?? generateCallId(), name: tc.function?.name ?? '', args };
+    });
+
     return { toolCalls };
   }
 
-  // ── SSE Event Parser ───────────────────────────────────────────────────────
+  // ── SSE Chunk Parser ─────────────────────────────────────────────────────────
 
-  private parseAndEmit(raw: string, onEvent: (event: AgentEvent) => void, toolCallsBuffer: Map<number, any>): void {
+  private parseSSEChunk(
+    raw: string,
+    onEvent: (event: AgentEvent) => void,
+    toolBuffer: Map<number, ToolCallAccumulator>,
+  ): void {
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
 
-      // IBM Orchestrate SSE shapes vary — handle the most common ones:
-
-      // Shape 1: { type: 'content_delta', delta: '...' }
-      if (parsed.type === 'content_delta' && parsed.delta) {
-        onEvent({ type: 'content_delta', data: { delta: parsed.delta as string }, timestamp: new Date() });
+      // Native IBM Orchestrate delta format
+      if (parsed.type === 'content_delta') {
+        onEvent({
+          type: 'content_delta',
+          data: { delta: parsed.delta as string },
+          timestamp: new Date(),
+        });
         return;
       }
 
-      // Shape 2: { type: 'content_done', content: '...' }
-      if (parsed.type === 'content_done' && parsed.content) {
-        onEvent({ type: 'content_done', data: { content: parsed.content as string }, timestamp: new Date() });
+      if (parsed.type === 'content_done') {
+        onEvent({
+          type: 'content_done',
+          data: { content: parsed.content as string },
+          timestamp: new Date(),
+        });
         return;
       }
 
-      // Shape 3 & 4: { choices: [...] } (OpenAI-compatible)
-      const choices = parsed.choices as any[] | undefined;
+      // OpenAI-compatible choices format (most common)
+      const choices = parsed.choices as Array<{
+        delta?: { content?: string; tool_calls?: Array<{
+          index: number; id?: string;
+          function?: { name?: string; arguments?: string };
+        }>};
+        finish_reason?: string;
+      }> | undefined;
+
       if (choices?.length) {
         const delta = choices[0].delta;
-        if (delta) {
-          if (delta.content) {
-            onEvent({ type: 'content_delta', data: { delta: delta.content }, timestamp: new Date() });
+        if (delta?.content) {
+          onEvent({
+            type: 'content_delta',
+            data: { delta: delta.content },
+            timestamp: new Date(),
+          });
+        }
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const existing = toolBuffer.get(tc.index) ?? {
+              id: tc.id ?? '',
+              name: '',
+              args: {},
+              _argsStr: '',
+            };
+            if (tc.id) existing.id = tc.id;
+            if (tc.function?.name) existing.name = tc.function.name;
+            if (tc.function?.arguments) existing._argsStr = (existing._argsStr ?? '') + tc.function.arguments;
+            toolBuffer.set(tc.index, existing);
           }
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const existing = toolCallsBuffer.get(tc.index) || { id: tc.id, type: 'function', function: { name: '', arguments: '' } };
-              if (tc.id) existing.id = tc.id;
-              if (tc.function?.name) existing.function.name = tc.function.name;
-              if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
-              toolCallsBuffer.set(tc.index, existing);
+        }
+        if (choices[0].finish_reason === 'stop' || choices[0].finish_reason === 'tool_calls') {
+          // Finalize tool call args from accumulated strings
+          for (const [idx, tc] of toolBuffer.entries()) {
+            if (tc._argsStr && !Object.keys(tc.args).length) {
+              try {
+                tc.args = JSON.parse(tc._argsStr) as Record<string, unknown>;
+              } catch {
+                tc.args = {};
+              }
             }
+            toolBuffer.set(idx, tc);
           }
         }
         return;
       }
 
-      // Shape 5: { object: 'thread.message.delta', delta: { content: [...] } } (Assistant API format fallback)
-      if (parsed.object === 'thread.message.delta' && parsed.delta) {
-        const contentArr = (parsed.delta as any)?.content;
-        if (Array.isArray(contentArr) && contentArr.length > 0) {
-          const textVal = contentArr[0]?.text?.value;
-          if (typeof textVal === 'string' && textVal.length > 0) {
-            onEvent({ type: 'content_delta', data: { delta: textVal }, timestamp: new Date() });
-          }
+      // IBM Thread API format
+      if (parsed.object === 'thread.message.delta') {
+        const contentArr = (parsed.delta as { content?: Array<{ text?: { value?: string } }> })?.content;
+        if (Array.isArray(contentArr) && contentArr[0]?.text?.value) {
+          onEvent({
+            type: 'content_delta',
+            data: { delta: contentArr[0].text.value },
+            timestamp: new Date(),
+          });
         }
         return;
       }
 
-      // Shape 5: { output: '...', done: true }
+      // Legacy text/output shapes
       if (parsed.output) {
         const text = parsed.output as string;
-        for (let i = 0; i < text.length; i += 8) {
-          onEvent({ type: 'content_delta', data: { delta: text.slice(i, i + 8) }, timestamp: new Date() });
+        for (let i = 0; i < text.length; i += 12) {
+          onEvent({
+            type: 'content_delta',
+            data: { delta: text.slice(i, i + 12) },
+            timestamp: new Date(),
+          });
         }
         onEvent({ type: 'content_done', data: { content: text }, timestamp: new Date() });
         return;
       }
 
-      // Shape 5: { text: '...' }
       if (typeof parsed.text === 'string') {
-        onEvent({ type: 'content_delta', data: { delta: parsed.text }, timestamp: new Date() });
-        return;
-      }
-
-      // Shape 6: status events
-      if (parsed.type === 'status' || parsed.status) {
-        const rawStatus = String(parsed.status ?? parsed.type);
-        const VALID_STATUSES = ['idle', 'thinking', 'executing', 'waiting', 'done', 'error'] as const;
-        type AgentStatusUnion = typeof VALID_STATUSES[number];
-        const status: AgentStatusUnion = (VALID_STATUSES as readonly string[]).includes(rawStatus)
-          ? rawStatus as AgentStatusUnion
-          : 'thinking';
-        onEvent({ type: 'status_update', data: { status }, timestamp: new Date() });
+        onEvent({
+          type: 'content_delta',
+          data: { delta: parsed.text },
+          timestamp: new Date(),
+        });
         return;
       }
     } catch {
-      // Non-JSON SSE line — skip silently
+      // Non-JSON SSE lines are normal (comments, keep-alives)
     }
   }
 
-  /** Test connectivity to the Orchestrate endpoint */
+  // ── Health Check ─────────────────────────────────────────────────────────────
+
   async ping(): Promise<boolean> {
     try {
-      const r = await fetch(this.config.agentUrl.replace(/\/run$/, '/health'), {
+      const healthUrl = this.config.agentUrl.replace(/\/chat\/completions$/, '/health').replace(/\/run$/, '/health');
+      const r = await fetch(healthUrl, {
         method: 'GET',
         headers: this.authHeaders,
         signal: AbortSignal.timeout(5000),
@@ -401,4 +509,45 @@ export class OrchestrateClient {
       return false;
     }
   }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+interface ToolCallAccumulator {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  _argsStr?: string;
+}
+
+function cleanMessages(msgs: OrchestrateMessage[]): OrchestrateMessage[] {
+  const result: OrchestrateMessage[] = [];
+  for (const msg of msgs) {
+    const prev = result[result.length - 1];
+    if (prev && prev.role === msg.role && msg.role !== 'tool') {
+      prev.content = (prev.content || '') + '\n\n' + (msg.content || '');
+      if (msg.tool_calls) {
+        prev.tool_calls = [...(prev.tool_calls ?? []), ...msg.tool_calls];
+      }
+    } else {
+      result.push({ ...msg });
+    }
+  }
+  return result;
+}
+
+function generateCallId(): string {
+  return 'call_' + Math.random().toString(36).slice(2, 11);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function mapHttpErrorCode(status: number): string {
+  if (status === 401 || status === 403) return 'IBM_AUTH_ERROR';
+  if (status === 429) return 'IBM_RATE_LIMITED';
+  if (status === 503 || status === 502) return 'IBM_SERVICE_UNAVAILABLE';
+  if (status === 408 || status === 504) return 'IBM_TIMEOUT';
+  return 'IBM_REQUEST_ERROR';
 }

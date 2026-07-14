@@ -4,6 +4,9 @@
 
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { enableMapSet } from 'immer';
+
+enableMapSet();
 import type { Workspace, WorkspaceFile } from '@ibm-agent/types';
 
 interface WorkspaceState {

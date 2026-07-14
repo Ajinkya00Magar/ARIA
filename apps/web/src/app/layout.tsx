@@ -1,32 +1,29 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Geist } from 'next/font/google';
 import { Providers } from '@/components/providers';
 import './globals.css';
-import { cn } from "@/lib/utils";
-
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
-
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
-  title: 'IBM Coding Agent',
-  description: 'Production-ready AI Coding Agent powered by IBM watsonx.ai and Granite Code',
+  title: 'ARIA — Agentic Repository Intelligence Assistant',
+  description: 'AI-native coding IDE powered by IBM watsonx Orchestrate. Read, write, and run code with autonomous agent intelligence.',
+  keywords: ['AI coding', 'IBM watsonx', 'code agent', 'IDE', 'developer tools'],
   icons: { icon: '/favicon.ico' },
+  openGraph: {
+    title: 'ARIA — AI Coding Agent',
+    description: 'Powered by IBM watsonx Orchestrate',
+    type: 'website',
+  },
 };
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#0f172a' },
-  ],
+  themeColor: '#161616',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={cn("font-sans", geist.variable)}>
-      <body className={`${inter.variable} font-sans antialiased`}>
+    <html lang="en" suppressHydrationWarning>
+      <body className="antialiased bg-[#101010] text-[#f4f4f4]">
         <Providers>{children}</Providers>
       </body>
     </html>

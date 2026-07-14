@@ -45,8 +45,8 @@ export default function RegisterPage() {
         data: { user: unknown; accessToken: string };
       }>('/auth/register', { email: data.email, password: data.password, name: data.name });
       setAuth(res.data.data.user as never, res.data.data.accessToken);
-      router.push('/dashboard');
-      toast.success('Account created! Welcome to IBM Coding Agent.');
+      router.push('/workspace');
+      toast.success('Account created! Welcome to ARIA.');
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Registration failed';
       toast.error(msg);
@@ -65,10 +65,10 @@ export default function RegisterPage() {
       >
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 mb-4">
-            <span className="text-2xl font-bold text-primary">⬡</span>
+            <span className="text-2xl font-bold text-primary">⚡</span>
           </div>
           <h1 className="text-2xl font-bold">Create Account</h1>
-          <p className="text-muted-foreground text-sm mt-1">Start coding with IBM watsonx.ai</p>
+          <p className="text-muted-foreground text-sm mt-1">AI coding powered by IBM watsonx Orchestrate</p>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 shadow-lg">

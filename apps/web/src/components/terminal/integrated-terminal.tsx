@@ -1,17 +1,17 @@
 'use client';
 
 import React, { useEffect, useRef, useCallback } from 'react';
-import { Terminal } from 'xterm';
+import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { io, Socket } from 'socket.io-client';
-import 'xterm/css/xterm.css';
 
 interface IntegratedTerminalProps {
   workspacePath: string;
+  visible?: boolean;
 }
 
-export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
+export function IntegratedTerminal({ workspacePath, visible = true }: IntegratedTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -38,6 +38,15 @@ export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
       // Ignore fit errors
     }
   }, []);
+
+  // ── Trigger fit when visibility changes ──────────────────────────────────
+  useEffect(() => {
+    if (visible) {
+      fitTerminal();
+      const timer = setTimeout(fitTerminal, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [visible, fitTerminal]);
 
   useEffect(() => {
     if (!containerRef.current) return;

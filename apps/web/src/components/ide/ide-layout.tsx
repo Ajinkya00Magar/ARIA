@@ -14,6 +14,7 @@ import { BottomPanel } from '@/components/ide/bottom-panel';
 import { useAgentStore } from '@/stores/agent-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { apiClient } from '@/lib/api-client';
+import { toast } from 'sonner';
 import type { Workspace } from '@ibm-agent/types';
 
 export function IdeLayout() {
@@ -23,8 +24,59 @@ export function IdeLayout() {
   const [showBottom, setShowBottom] = useState(false);
   const [activeBottomPanel, setActiveBottomPanel] = useState<'terminal' | 'output' | 'problems'>('terminal');
   const { permissionRequest } = useAgentStore();
-  const { setWorkspace } = useWorkspaceStore();
+  const { currentWorkspace, openFiles, activeFileIndex, setWorkspace } = useWorkspaceStore();
   const params = useParams<{ id?: string }>();
+
+  // ── Open terminal panel ──────────────────────────────────────────────────
+  const handleOpenTerminal = () => {
+    setShowBottom(true);
+    setActiveBottomPanel('terminal');
+  };
+
+  // ── Run active file ──────────────────────────────────────────────────────
+  const handleRunFile = async () => {
+    const activeFile = openFiles[activeFileIndex];
+    if (!activeFile || !currentWorkspace) {
+      toast.error('No file open to run');
+      return;
+    }
+
+    // Determine run command by extension
+    const ext = activeFile.name.split('.').pop()?.toLowerCase() ?? '';
+    const commandMap: Record<string, string> = {
+      py: `python "${activeFile.path}"`,
+      js: `node "${activeFile.path}"`,
+      ts: `tsx "${activeFile.path}"`,
+      sh: `bash "${activeFile.path}"`,
+      rb: `ruby "${activeFile.path}"`,
+      go: `go run "${activeFile.path}"`,
+      rs: `cargo run`,
+      java: `javac "${activeFile.path}" && java "${activeFile.name.replace('.java', '')}"`,
+    };
+    const command = commandMap[ext];
+    if (!command) {
+      toast.error(`No run command available for .${ext} files`);
+      return;
+    }
+
+    // Open the terminal panel so output is visible
+    setShowBottom(true);
+    setActiveBottomPanel('terminal');
+
+    // Execute the command via the terminal API
+    try {
+      const res = await apiClient.post<{ data: { stdout: string; stderr: string; exitCode: number } }>(
+        `/terminal/${currentWorkspace.id}/exec`,
+        { command },
+      );
+      const { stdout, stderr, exitCode } = res.data.data;
+      if (stdout) toast.success(stdout.slice(0, 120));
+      if (stderr) toast.error(stderr.slice(0, 120));
+      if (exitCode !== 0) toast.warning(`Process exited with code ${exitCode}`);
+    } catch {
+      toast.error('Failed to run file — is the API server running?');
+    }
+  };
 
   // Load workspace if ID in URL
   useEffect(() => {
@@ -69,6 +121,8 @@ export function IdeLayout() {
         showSidebar={showSidebar}
         onToggleChat={() => setShowChat((v) => !v)}
         onToggleSidebar={() => setShowSidebar((v) => !v)}
+        onOpenTerminal={handleOpenTerminal}
+        onRunFile={() => { void handleRunFile(); }}
       />
 
       <div className="flex flex-1 overflow-hidden">

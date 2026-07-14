@@ -30,6 +30,9 @@ export class FileSystemTool {
   // ── Path Safety ───────────────────────────────────────────────────────────────
 
   private resolveSafe(relativePath: string): string {
+    if (!relativePath || typeof relativePath !== 'string') {
+      throw new ValidationError('Path is required and must be a non-empty string');
+    }
     const cleaned = sanitizePath(relativePath);
     const resolved = path.resolve(this.workspaceRoot, cleaned);
 

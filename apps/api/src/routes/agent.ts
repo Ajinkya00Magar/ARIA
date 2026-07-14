@@ -83,3 +83,14 @@ agentRouter.post('/permission/:requestId', async (req: Request, res: Response) =
 
   res.json({ success: true, data: { message: `Permission ${approved ? 'approved' : 'denied'}` } });
 });
+
+// GET /api/agent/status — returns IBM Orchestrate connection status
+agentRouter.get('/status', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    data: {
+      orchestrateEnabled: agentService.isOrchestrateEnabled,
+      timestamp: new Date().toISOString(),
+    },
+  });
+});

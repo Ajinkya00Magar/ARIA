@@ -51,7 +51,7 @@ export function IDEChat({ workspaceId, onClose }: IDEChatProps) {
       id: 'welcome',
       role: 'system',
       content:
-        '👋 **IBM Coding Agent** ready. I can read files, write code, run tests, manage git, and more. What would you like to build?',
+        '👋 **ARIA** ready. I can read files, write code, run tests, manage git, and more. What would you like to build?',
       timestamp: new Date(),
     },
   ]);
@@ -198,7 +198,7 @@ export function IDEChat({ workspaceId, onClose }: IDEChatProps) {
           <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center">
             <Bot className="w-4 h-4 text-primary" />
           </div>
-          <span className="text-sm font-medium">IBM Coding Agent</span>
+          <span className="text-sm font-medium">ARIA</span>
           {isStreaming && (
             <motion.div
               animate={{ opacity: [1, 0.3, 1] }}
