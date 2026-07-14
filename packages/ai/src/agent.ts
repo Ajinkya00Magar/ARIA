@@ -19,6 +19,7 @@ import { AgentError, generateId, sleep, MAX_RETRIES } from '@ibm-agent/shared';
 import { WatsonxClient } from './watsonx-client';
 import { AGENT_TOOLS } from './tools';
 import { buildSystemPrompt } from './prompts';
+import { extractToolCallsFromText } from './tool-call-parser';
 
 export type ToolExecutorFn = (
   toolName: ToolName,
@@ -159,6 +160,27 @@ export class CodingAgent {
       } catch (err) {
         emit(onEvent, 'agent_error', { error: String(err), code: 'STREAM_ERROR' });
         throw new AgentError(`Streaming failed: ${String(err)}`);
+      }
+
+      // ── Fallback: model emitted tool calls as markdown JSON text ──────────
+      // Granite sometimes skips the native tool_calls API and prints the call
+      // as a ```json ... ``` block. Parse and strictly validate those blocks
+      // against AGENT_TOOLS, then continue the loop as if they were native.
+      if (toolCallsBuffer.size === 0 && contentBuffer) {
+        const extraction = extractToolCallsFromText(contentBuffer);
+        if (extraction.toolCalls.length > 0) {
+          extraction.toolCalls.forEach((tc, i) => {
+            toolCallsBuffer.set(i, {
+              id: tc.id,
+              name: tc.function.name,
+              argumentsStr: tc.function.arguments,
+            });
+          });
+          contentBuffer = extraction.cleanedContent;
+          finishReason = 'tool_calls';
+          // Re-emit cleaned content so the UI drops the raw JSON block
+          emit(onEvent, 'content_done', { content: extraction.cleanedContent });
+        }
       }
 
       // If no tool calls — agent is done

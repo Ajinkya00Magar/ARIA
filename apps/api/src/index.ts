@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ARIA API — Entry Point
+// IBM Coding Agent API — Entry Point
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dotenv/config';
@@ -13,7 +13,7 @@ import { initTerminalSockets } from './lib/terminal-socket';
 const logger = createLogger('server');
 
 async function main() {
-  // Connect to database (SQLite local / PostgreSQL production)
+  // Connect to PostgreSQL
   await connectDatabase();
   logger.info('Database connected');
 
@@ -21,12 +21,12 @@ async function main() {
   const port = env.PORT;
 
   const server = app.listen(port, () => {
-    logger.info({ port, env: env.NODE_ENV, version: process.env.npm_package_version ?? '1.0.0' }, 'ARIA API running');
+    logger.info({ port, env: env.NODE_ENV, version: process.env.npm_package_version ?? '1.0.0' }, 'IBM Coding Agent API running');
   });
 
   const io = new SocketServer(server, {
     cors: {
-      origin: env.ALLOWED_ORIGINS,
+      origin: '*', // We'll want to restrict this in production
     },
   });
 
@@ -58,5 +58,3 @@ main().catch((err) => {
   console.error('Failed to start server:', err);
   process.exit(1);
 });
-
-// Trigger restart

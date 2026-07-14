@@ -4,52 +4,43 @@
 
 import '../lib/env';
 import bcrypt from 'bcryptjs';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import Database from 'better-sqlite3';
-import path from 'path';
-import { users, userSettings } from './schema';
-import { eq } from 'drizzle-orm';
+import { Pool } from 'pg';
+import { randomUUID } from 'crypto';
 
 async function seed() {
-  const dbPath = path.resolve(process.cwd(), 'local.db');
-  const sqlite = new Database(dbPath);
-  const db = drizzle(sqlite);
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  });
 
   try {
     console.log('Seeding database...');
 
+    // Create admin user
+    const adminId = randomUUID();
     const passwordHash = await bcrypt.hash('Admin@123456!', 12);
 
-    // Check if admin user already exists
-    const existingAdmin = db.select().from(users).where(eq(users.email, 'admin@ibm-agent.local')).get();
+    await pool.query(
+      `INSERT INTO users (id, email, name, password_hash, role, provider)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (email) DO NOTHING`,
+      [adminId, 'admin@ibm-agent.local', 'Admin User', passwordHash, 'admin', 'local'],
+    );
 
-    if (!existingAdmin) {
-      db.insert(users).values({
-        email: 'admin@ibm-agent.local',
-        name: 'Admin User',
-        passwordHash,
-        role: 'admin',
-        provider: 'local',
-      }).run();
+    // Create default settings for admin
+    await pool.query(
+      `INSERT INTO user_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [adminId],
+    );
 
-      const newAdmin = db.select().from(users).where(eq(users.email, 'admin@ibm-agent.local')).get();
-      if (newAdmin) {
-        db.insert(userSettings).values({
-          userId: newAdmin.id,
-        }).run();
-        console.log('✅ Admin user created: admin@ibm-agent.local / Admin@123456!');
-      }
-    } else {
-      console.log('ℹ️ Admin user already exists.');
-    }
-
+    console.log('✅ Admin user created: admin@ibm-agent.local / Admin@123456!');
+    console.log('⚠️  Change the password immediately after first login!');
   } catch (err) {
     console.error('Seed failed:', err);
     process.exit(1);
   } finally {
-    sqlite.close();
+    await pool.end();
   }
 }
 
 seed().catch(console.error);
-

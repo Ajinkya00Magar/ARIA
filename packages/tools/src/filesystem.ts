@@ -24,6 +24,14 @@ const FORBIDDEN_PATHS = [
   'C:\\System32',
 ];
 
+// write_file emits UTF-8 text — a compiled binary written through it is always
+// corrupt (Windows: "This app can't run on your PC" / "Access is denied").
+// Binaries must come from real build tools via run_terminal.
+const BINARY_WRITE_BLOCKLIST = new Set([
+  '.exe', '.dll', '.so', '.dylib', '.o', '.obj', '.a', '.lib', '.bin',
+  '.class', '.pyc', '.wasm',
+]);
+
 export class FileSystemTool {
   constructor(private readonly workspaceRoot: string) {}
 
@@ -94,6 +102,14 @@ export class FileSystemTool {
     createDirectories = true,
   ): Promise<{ path: string; size: number; created: boolean }> {
     const fullPath = this.resolveSafe(relativePath);
+
+    const ext = path.extname(fullPath).toLowerCase();
+    if (BINARY_WRITE_BLOCKLIST.has(ext)) {
+      throw new ValidationError(
+        `Refusing to write binary file "${relativePath}" as text — it would be corrupt. ` +
+        `Compiled artifacts must be produced by a build tool (e.g. g++, make) via run_terminal.`,
+      );
+    }
 
     let created = false;
     try {

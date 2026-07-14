@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { AgentEvent, ToolName } from '@ibm-agent/types';
 import { useAgentStream } from '@/hooks/use-agent-stream';
+import { useAgentStore } from '@/stores/agent-store';
 import { useToast } from '@/hooks/use-toast';
 
 interface ChatMessage {
@@ -51,7 +52,7 @@ export function IDEChat({ workspaceId, onClose }: IDEChatProps) {
       id: 'welcome',
       role: 'system',
       content:
-        '👋 **ARIA** ready. I can read files, write code, run tests, manage git, and more. What would you like to build?',
+        '👋 **IBM Coding Agent** ready. I can read files, write code, run tests, manage git, and more. What would you like to build?',
       timestamp: new Date(),
     },
   ]);
@@ -139,6 +140,13 @@ export function IDEChat({ workspaceId, onClose }: IDEChatProps) {
         );
         break;
       }
+      case 'permission_request': {
+        const { requestId, action, description, details } = event.data as {
+          requestId: string; action: string; description: string; details: Record<string, unknown>;
+        };
+        useAgentStore.getState().setPermissionRequest({ requestId, action, description, details });
+        break;
+      }
     }
   }, [scrollToBottom]);
 
@@ -198,7 +206,7 @@ export function IDEChat({ workspaceId, onClose }: IDEChatProps) {
           <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center">
             <Bot className="w-4 h-4 text-primary" />
           </div>
-          <span className="text-sm font-medium">ARIA</span>
+          <span className="text-sm font-medium">IBM Coding Agent</span>
           {isStreaming && (
             <motion.div
               animate={{ opacity: [1, 0.3, 1] }}

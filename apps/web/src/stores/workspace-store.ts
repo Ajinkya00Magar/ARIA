@@ -5,9 +5,10 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { enableMapSet } from 'immer';
-
-enableMapSet();
 import type { Workspace, WorkspaceFile } from '@ibm-agent/types';
+
+// Required because expandedFolders is a Set mutated inside immer drafts
+enableMapSet();
 
 interface WorkspaceState {
   currentWorkspace: Workspace | null;
