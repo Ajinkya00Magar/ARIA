@@ -26,6 +26,7 @@ export function truncate(str: string, maxLength: number): string {
 }
 
 export function sanitizePath(inputPath: string): string {
+  if (!inputPath || typeof inputPath !== 'string') return '';
   return inputPath.replace(/\.\./g, '').replace(/\/+/g, '/').replace(/\\/g, '/');
 }
 

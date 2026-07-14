@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useEffect, useRef, useCallback } from 'react';
-import { Terminal } from 'xterm';
+import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { io, Socket } from 'socket.io-client';
-import 'xterm/css/xterm.css';
+import '@xterm/xterm/css/xterm.css';
 
 interface IntegratedTerminalProps {
   workspacePath: string;
@@ -16,18 +16,23 @@ export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
   const termRef = useRef<Terminal | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  // Guards against xterm calls after dispose (React Strict Mode double-mounts,
+  // socket events firing during teardown) → "reading 'dimensions'" crashes
+  const disposedRef = useRef(false);
 
   const fitTerminal = useCallback(() => {
     try {
       if (
+        !disposedRef.current &&
         containerRef.current &&
         containerRef.current.clientWidth > 0 &&
         containerRef.current.clientHeight > 0 &&
-        fitAddonRef.current
+        fitAddonRef.current &&
+        termRef.current?.element // only fit once xterm is attached to the DOM
       ) {
         fitAddonRef.current.fit();
         // Notify backend about resize
-        if (socketRef.current && termRef.current) {
+        if (socketRef.current?.connected && termRef.current) {
           socketRef.current.emit('resize', {
             cols: termRef.current.cols,
             rows: termRef.current.rows,
@@ -39,8 +44,20 @@ export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
     }
   }, []);
 
+  /** Write to the terminal only while it's alive */
+  const safeWrite = useCallback((fn: (t: Terminal) => void) => {
+    const term = termRef.current;
+    if (!term || disposedRef.current) return;
+    try {
+      fn(term);
+    } catch {
+      // terminal was torn down mid-write — ignore
+    }
+  }, []);
+
   useEffect(() => {
     if (!containerRef.current) return;
+    disposedRef.current = false;
 
     // ── Initialize xterm.js ────────────────────────────────────────────────
     const term = new Terminal({
@@ -84,8 +101,8 @@ export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
 
-    // Fit after DOM settles
-    setTimeout(fitTerminal, 150);
+    // Fit after DOM settles (cleared on unmount)
+    const fitTimeout = setTimeout(fitTerminal, 150);
 
     // ── Socket.io connection ──────────────────────────────────────────────
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -96,45 +113,58 @@ export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      term.writeln('\r\n\x1b[32m[Connected to terminal]\x1b[0m\r\n');
+      safeWrite((t) => t.writeln('\r\n\x1b[32m[Connected to terminal]\x1b[0m\r\n'));
       socket.emit('init', { workspacePath });
       fitTerminal();
     });
 
     socket.on('data', (data: string) => {
-      term.write(data);
+      safeWrite((t) => t.write(data));
     });
 
     socket.on('disconnect', () => {
-      term.writeln('\r\n\x1b[33m[Terminal disconnected. Reconnecting...]\x1b[0m\r\n');
+      safeWrite((t) => t.writeln('\r\n\x1b[33m[Terminal disconnected. Reconnecting...]\x1b[0m\r\n'));
     });
 
     socket.on('connect_error', () => {
-      term.writeln('\r\n\x1b[31m[Cannot connect to terminal backend. Make sure the API is running.]\x1b[0m\r\n');
+      safeWrite((t) =>
+        t.writeln('\r\n\x1b[31m[Cannot connect to terminal backend. Make sure the API is running.]\x1b[0m\r\n'),
+      );
     });
 
     // Send user input to backend
     term.onData((data) => {
-      socket.emit('data', data);
+      if (!disposedRef.current) socket.emit('data', data);
     });
 
     // ── Resize observer ────────────────────────────────────────────────────
     const resizeObserver = new ResizeObserver(() => {
       fitTerminal();
     });
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
+    resizeObserver.observe(containerRef.current);
 
     window.addEventListener('resize', fitTerminal);
 
     return () => {
+      // Mark disposed FIRST so in-flight socket events / timers become no-ops
+      disposedRef.current = true;
+      clearTimeout(fitTimeout);
       window.removeEventListener('resize', fitTerminal);
       resizeObserver.disconnect();
+      // Detach socket handlers before disconnecting — disconnect() fires the
+      // 'disconnect' event, which would otherwise write to a disposed terminal
+      socket.removeAllListeners();
       socket.disconnect();
-      term.dispose();
+      socketRef.current = null;
+      fitAddonRef.current = null;
+      termRef.current = null;
+      try {
+        term.dispose();
+      } catch {
+        // already disposed
+      }
     };
-  }, [workspacePath, fitTerminal]);
+  }, [workspacePath, fitTerminal, safeWrite]);
 
   return (
     <div className="w-full h-full bg-[#0e0e0e] overflow-hidden">

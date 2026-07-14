@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { AgentEvent, ToolName } from '@ibm-agent/types';
 import { useAgentStream } from '@/hooks/use-agent-stream';
+import { useAgentStore } from '@/stores/agent-store';
 import { useToast } from '@/hooks/use-toast';
 
 interface ChatMessage {
@@ -137,6 +138,13 @@ export function IDEChat({ workspaceId, onClose }: IDEChatProps) {
         setMessages((prev) =>
           prev.map((m) => (m.id === aid ? { ...m, isStreaming: false, error } : m)),
         );
+        break;
+      }
+      case 'permission_request': {
+        const { requestId, action, description, details } = event.data as {
+          requestId: string; action: string; description: string; details: Record<string, unknown>;
+        };
+        useAgentStore.getState().setPermissionRequest({ requestId, action, description, details });
         break;
       }
     }

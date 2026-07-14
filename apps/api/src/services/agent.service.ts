@@ -131,7 +131,13 @@ class AgentService {
 
     const executor = ws
       ? new ToolExecutor(ws.path, async (cmd) => {
-          return permissionService.request(opts.pendingPermissions, cmd, 'terminal', { command: cmd });
+          return permissionService.request(
+            opts.pendingPermissions,
+            cmd,
+            'terminal',
+            { command: cmd },
+            opts.onEvent,
+          );
         })
       : undefined;
 
@@ -161,7 +167,13 @@ class AgentService {
           return executor.execute(toolName, args);
         },
         requestPermissionFn: async (action, description, details) => {
-          return permissionService.request(opts.pendingPermissions, action, description, details);
+          return permissionService.request(
+            opts.pendingPermissions,
+            action,
+            description,
+            details,
+            opts.onEvent,
+          );
         },
       });
     } else if (this.orchestrate) {
@@ -208,7 +220,13 @@ class AgentService {
           return `Tool "${toolName}" requires an open workspace. Please open a workspace first.`;
         },
         requestPermissionFn: async (action, description, details) => {
-          return permissionService.request(opts.pendingPermissions, action, description, details);
+          return permissionService.request(
+            opts.pendingPermissions,
+            action,
+            description,
+            details,
+            opts.onEvent,
+          );
         },
       });
     }

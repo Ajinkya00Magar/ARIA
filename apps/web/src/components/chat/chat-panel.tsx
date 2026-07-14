@@ -32,8 +32,9 @@ interface ToolCall {
 
 // Tools that modify files — trigger explorer refresh
 const FILE_MODIFYING_TOOLS = new Set([
-  'write_file', 'create_file', 'delete_file', 'rename_file',
-  'write', 'create', 'delete', 'rename', 'mkdir',
+  'write_file', 'delete_file', 'rename_file', 'move_file',
+  'create_folder', 'replace_code', 'run_terminal', 'install_packages',
+  'git_checkout', 'git_pull',
 ]);
 
 export function ChatPanel() {
@@ -238,6 +239,14 @@ export function ChatPanel() {
           toolCallMap.set(toolCallId, tc);
           setActiveMsgToolCalls(new Map(toolCallMap));
         }
+        break;
+      }
+      case 'permission_request': {
+        const { requestId, action, description, details } = event.data as {
+          requestId: string; action: string; description: string; details: Record<string, unknown>;
+        };
+        useAgentStore.getState().setPermissionRequest({ requestId, action, description, details });
+        setAgentStatus('waiting');
         break;
       }
     }
