@@ -118,6 +118,9 @@ export const chats = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
+    // watsonx Orchestrate server-side thread id (X-IBM-THREAD-ID) — keeps the
+    // platform-side conversation continuous across turns for this chat.
+    orchestrateThreadId: text('orchestrate_thread_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
   },

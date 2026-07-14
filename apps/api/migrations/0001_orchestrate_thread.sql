@@ -1,0 +1,1 @@
+ALTER TABLE `chats` ADD `orchestrate_thread_id` text;

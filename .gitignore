@@ -132,3 +132,7 @@ id_rsa.pub
 
 # IBM Cloud / credentials
 ibm-credentials.env
+
+# Local SQLite database (chat history, workspaces — machine-local state)
+local.db
+*.db-journal

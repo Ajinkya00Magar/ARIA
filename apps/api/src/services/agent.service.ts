@@ -42,8 +42,11 @@ class AgentService {
     });
     this.agent = new CodingAgent(this.watsonx);
 
-    // Initialize IBM Orchestrate client if URL is configured
-    if (env.IBM_ORCHESTRATE_URL) {
+    // IBM Orchestrate is opt-in: the platform agent carries its own
+    // instructions and Flows (which can lock the chat with "A new flow has
+    // started...") and may ignore per-request tool definitions. Only route
+    // through it when USE_ORCHESTRATE=true is set explicitly.
+    if (env.USE_ORCHESTRATE && env.IBM_ORCHESTRATE_URL) {
       this.orchestrate = new OrchestrateClient({
         agentUrl: env.IBM_ORCHESTRATE_URL,
         apiKey: env.IBM_ORCHESTRATE_API_KEY ?? '',
@@ -52,7 +55,11 @@ class AgentService {
       logger.info(`🤖 IBM Orchestrate agent configured: ${env.IBM_ORCHESTRATE_URL}`);
     } else {
       this.orchestrate = null;
-      logger.info('⚡ Using watsonx CodingAgent (set IBM_ORCHESTRATE_URL to use Orchestrate)');
+      if (env.IBM_ORCHESTRATE_URL) {
+        logger.info('⚡ IBM_ORCHESTRATE_URL is set but USE_ORCHESTRATE is not true — using local watsonx CodingAgent');
+      } else {
+        logger.info('⚡ Using watsonx CodingAgent');
+      }
     }
   }
 
@@ -71,7 +78,7 @@ class AgentService {
     }
 
     // ── Load or create chat (skip if no workspace — notNull constraint) ──────
-    let chatRow: { id: string } | undefined;
+    let chatRow: { id: string; orchestrateThreadId?: string | null } | undefined;
     if (opts.workspaceId) {
       if (opts.chatId) {
         const [found] = await db.select().from(chats).where(eq(chats.id, opts.chatId)).limit(1);
@@ -101,13 +108,23 @@ class AgentService {
       chatRow = { id: opts.chatId || generateId() };
     }
 
+    // Tell the client which chat this run belongs to so it can reuse the id
+    // on the next turn (otherwise the conversation context is lost).
+    opts.onEvent({
+      type: 'chat_info',
+      data: { chatId: chatRow.id },
+      timestamp: new Date(),
+    });
+
     // ── Load chat history ──────────────────────────────────────────────────
+    // Secondary sort on id: createdAt has second granularity in SQLite, so
+    // same-second messages can reorder without it.
     const historyRows = opts.workspaceId && chatRow
       ? await db
           .select()
           .from(messages)
           .where(eq(messages.chatId, chatRow.id))
-          .orderBy(messages.createdAt)
+          .orderBy(messages.createdAt, messages.id)
       : [];
 
     const chatHistory = historyRows.map((m) => ({
@@ -122,6 +139,8 @@ class AgentService {
 
     // ── Choose agent backend ───────────────────────────────────────────────
     let finalContent = '';
+    const toolCalls: any[] = [];
+    const toolResults: any[] = [];
 
     const executor = ws
       ? new ToolExecutor(ws.path, async (cmd) => {
@@ -141,12 +160,45 @@ class AgentService {
           ? `🤖 Routing to IBM Orchestrate with local workspace tools: ${ws.path}`
           : '🤖 Routing to IBM Orchestrate (no workspace — Q&A mode)'
       );
-      await this.orchestrate.run({
+      const result = await this.orchestrate.run({
         userMessage: opts.userMessage,
-        chatHistory: chatHistory.slice(0, -1).map((m) => ({
-          role: m.role as 'user' | 'assistant' | 'system',
-          content: m.content,
-        })),
+        // Server-side thread continuity (X-IBM-THREAD-ID) is the reliable
+        // context mechanism for Orchestrate; local history is the fallback
+        // replayed only on the first turn of a chat (no thread yet).
+        threadId: chatRow?.orchestrateThreadId ?? undefined,
+        chatHistory: chatHistory.slice(0, -1).flatMap((m) => {
+          const msgs: any[] = [];
+          
+          // Add the assistant message with tool calls if they exist
+          const astMsg: any = {
+            role: m.role === 'tool' ? 'assistant' : m.role,
+            content: m.content || '',
+          };
+          if (m.toolCalls && (m.toolCalls as any[]).length > 0) {
+            astMsg.tool_calls = (m.toolCalls as any[]).map((tc: any) => ({
+              id: tc.id,
+              type: 'function',
+              function: {
+                name: tc.name,
+                arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments)
+              }
+            }));
+          }
+          msgs.push(astMsg);
+          
+          // If this assistant message had tool results, we need to append the tool response messages
+          if (m.toolResults && (m.toolResults as any[]).length > 0) {
+            for (const tr of (m.toolResults as any[])) {
+              msgs.push({
+                role: 'tool',
+                tool_call_id: tr.id,
+                name: tr.name,
+                content: tr.output,
+              });
+            }
+          }
+          return msgs;
+        }),
         workspaceId: opts.workspaceId,
         systemPrompt: ws
           ? buildSystemPrompt(ws.projectSummary as ProjectSummary | null, [])
@@ -162,8 +214,30 @@ class AgentService {
           if (event.type === 'content_delta') {
             finalContent += (event.data as { delta: string }).delta;
           }
+          if (event.type === 'tool_start') {
+            const data = event.data as any;
+            toolCalls.push({ id: data.toolCallId, name: data.toolName, arguments: data.arguments });
+          }
+          if (event.type === 'tool_end') {
+            const data = event.data as any;
+            toolResults.push({ id: data.toolCallId, name: data.toolName, output: data.output });
+          }
         },
       });
+
+      // Persist the platform thread id so the next turn continues the same
+      // server-side conversation (this is what gives Aria her memory).
+      if (
+        result.threadId &&
+        opts.workspaceId &&
+        chatRow &&
+        result.threadId !== chatRow.orchestrateThreadId
+      ) {
+        await db
+          .update(chats)
+          .set({ orchestrateThreadId: result.threadId, updatedAt: new Date() })
+          .where(eq(chats.id, chatRow.id));
+      }
     } else if (ws && executor) {
       // ── LOCAL CodingAgent with real ToolExecutor (workspace open) ─────────
       const projectSummary = ws.projectSummary as ProjectSummary | null;
@@ -183,6 +257,14 @@ class AgentService {
           }
           if (event.type === 'content_delta') {
             finalContent += (event.data as { delta: string }).delta;
+          }
+          if (event.type === 'tool_start') {
+            const data = event.data as any;
+            toolCalls.push({ id: data.toolCallId, name: data.toolName, arguments: data.arguments });
+          }
+          if (event.type === 'tool_end') {
+            const data = event.data as any;
+            toolResults.push({ id: data.toolCallId, name: data.toolName, output: data.output });
           }
         },
         executeToolFn: async (toolName: ToolName, args, _workspaceId) => {
@@ -235,12 +317,14 @@ class AgentService {
 
     // ── Save assistant response (only when workspace exists) ──────────────
     const savedContent = finalContent.trim();
-    if (savedContent && opts.workspaceId && chatRow) {
+    if ((savedContent || toolCalls.length > 0) && opts.workspaceId && chatRow) {
       await db.insert(messages).values({
         id: generateId(),
         chatId: chatRow.id,
         role: 'assistant',
         content: savedContent,
+        toolCalls: toolCalls.length > 0 ? toolCalls : null,
+        toolResults: toolResults.length > 0 ? toolResults : null,
       });
     }
   }

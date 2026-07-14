@@ -130,8 +130,13 @@ export class FileSystemTool {
 
   // ── Delete File ───────────────────────────────────────────────────────────────
 
-  async deleteFile(relativePath: string, recursive = false): Promise<string> {
+  async deleteFile(relativePath: string, recursive = true): Promise<string> {
     const fullPath = this.resolveSafe(relativePath);
+
+    // Refuse to delete the workspace root itself, even recursively.
+    if (path.resolve(fullPath) === path.resolve(this.workspaceRoot)) {
+      throw new ValidationError('Cannot delete the workspace root directory');
+    }
 
     try {
       const stat = await fs.stat(fullPath);

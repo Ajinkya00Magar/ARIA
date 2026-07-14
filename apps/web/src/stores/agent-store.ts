@@ -78,10 +78,17 @@ export const useAgentStore = create<AgentState>()(
 
     finalizeStream: (content) =>
       set((state) => {
-        const streamMsg = state.messages.find((m) => m.isStreaming);
-        if (streamMsg) {
-          streamMsg.content = content;
-          streamMsg.isStreaming = false;
+        const idx = state.messages.findIndex((m) => m.isStreaming);
+        if (idx !== -1) {
+          if (content && content.trim()) {
+            state.messages[idx].content = content;
+            state.messages[idx].isStreaming = false;
+          } else {
+            // Empty finalize (e.g. the content was a consumed tool-call block)
+            // — drop the bubble entirely instead of leaving a stuck
+            // "Thinking…" placeholder in the conversation.
+            state.messages.splice(idx, 1);
+          }
         }
         state.currentStreamContent = '';
       }),
@@ -112,6 +119,7 @@ export const useAgentStore = create<AgentState>()(
 
     clearMessages: () =>
       set((state) => {
+        state.chatId = null;
         state.messages = [];
         state.currentStreamContent = '';
         state.agentStatus = 'idle';

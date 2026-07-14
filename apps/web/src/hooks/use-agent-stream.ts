@@ -46,6 +46,9 @@ export function useAgentStream() {
       }
 
       let buffer = '';
+      // The server emits a chat_info event with the canonical chat id; return
+      // it so callers can persist it and keep the conversation continuous.
+      let resolvedChatId = params.chatId;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -53,20 +56,23 @@ export function useAgentStream() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        
+
         buffer = lines.pop() || ''; // Keep the incomplete line in the buffer
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const dataStr = line.slice(6);
             if (dataStr === '[DONE]') {
-              return params.chatId; // Or whatever is returned on finish
+              return resolvedChatId;
             }
             try {
               const eventData = JSON.parse(dataStr);
+              if (eventData.type === 'chat_info') {
+                resolvedChatId = (eventData.data as { chatId: string }).chatId || resolvedChatId;
+              }
               if (eventData.type === 'stream_end') {
                 setIsStreaming(false);
-                return params.chatId;
+                return resolvedChatId;
               }
               onEvent(eventData as AgentEvent);
             } catch (e) {
@@ -75,6 +81,7 @@ export function useAgentStream() {
           }
         }
       }
+      return resolvedChatId;
     } catch (err: any) {
       if (err.name === 'AbortError') {
         console.log('Stream aborted');

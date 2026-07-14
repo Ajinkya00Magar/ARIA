@@ -116,7 +116,14 @@ export function ChatPanel() {
       createdAt: new Date(),
     });
 
-    const chatId = useAgentStore.getState().chatId ?? generateId();
+    // Reuse the existing chat id across turns — generating a fresh one per
+    // message creates a new chat row on the server and the agent loses all
+    // prior conversation context.
+    let chatId = useAgentStore.getState().chatId;
+    if (!chatId) {
+      chatId = generateId();
+      useAgentStore.getState().setChatId(chatId);
+    }
     const controller = new AbortController();
     setAbortController(controller);
     setAgentStatus('thinking');
@@ -176,6 +183,13 @@ export function ChatPanel() {
         setAgentStatus('error');
       }
     } finally {
+      // Safety net: if the stream ended without a final content_done (some
+      // Orchestrate iterations end on a raw SSE close), finalize whatever has
+      // streamed so the last bubble doesn't stay stuck in "Thinking…" state.
+      const st = useAgentStore.getState();
+      if (st.messages.some((m) => m.isStreaming)) {
+        st.finalizeStream(st.currentStreamContent);
+      }
       setIsStreaming(false);
       setAgentStatus('idle');
       setAbortController(null);
@@ -186,6 +200,13 @@ export function ChatPanel() {
 
   function handleAgentEvent(event: AgentEvent, toolCallMap: Map<string, ToolCall>) {
     switch (event.type) {
+      case 'chat_info': {
+        // Server tells us the canonical chat id — persist it so every
+        // following message lands in the same conversation.
+        const { chatId } = event.data as { chatId: string };
+        if (chatId) useAgentStore.getState().setChatId(chatId);
+        break;
+      }
       case 'content_delta':
         appendStreamDelta((event.data as { delta: string }).delta);
         break;

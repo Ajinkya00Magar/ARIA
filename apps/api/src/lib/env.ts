@@ -41,7 +41,13 @@ const envSchema = z.object({
   IBM_REGION: z.string().default('us-south'),
   IBM_MODEL_ID: z.string().default('ibm/granite-34b-code-instruct'),
 
-  // IBM Orchestrate Agent (optional — overrides watsonx when set)
+  // IBM Orchestrate Agent — the primary backend when IBM_ORCHESTRATE_URL is
+  // set. Set USE_ORCHESTRATE=false to fall back to the local watsonx
+  // CodingAgent (e.g. for debugging tool execution without the platform).
+  USE_ORCHESTRATE: z
+    .string()
+    .optional()
+    .transform((s) => s === undefined || !(s === 'false' || s === '0')),
   IBM_ORCHESTRATE_URL: z.string().url().optional(),
   IBM_ORCHESTRATE_API_KEY: z.string().optional(),
   IBM_ORCHESTRATE_BEARER_TOKEN: z.string().optional(),

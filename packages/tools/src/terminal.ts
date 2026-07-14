@@ -31,6 +31,16 @@ const BLOCKED_PATTERNS = [
   /wget.*\|\s*(bash|sh)/, // wget | sh
 ];
 
+// bash is not available on stock Windows — spawning it makes every
+// run_terminal call fail, so the agent falls back to telling the user to run
+// commands manually. Use the platform's native shell instead.
+function shellSpawnArgs(command: string): { cmd: string; args: string[] } {
+  if (process.platform === 'win32') {
+    return { cmd: 'cmd.exe', args: ['/d', '/s', '/c', command] };
+  }
+  return { cmd: 'bash', args: ['-c', command] };
+}
+
 export class TerminalTool {
   private readonly runningProcesses: Map<string, RunningProcess> = new Map();
 
@@ -93,7 +103,8 @@ export class TerminalTool {
       let stdout = '';
       let stderr = '';
 
-      const child = spawn('bash', ['-c', command], {
+      const shell = shellSpawnArgs(command);
+      const child = spawn(shell.cmd, shell.args, {
         cwd,
         env: {
           ...process.env,
@@ -151,7 +162,8 @@ export class TerminalTool {
 
     const cwd = path.resolve(this.workspaceRoot, cwdRelative);
 
-    const child = spawn('bash', ['-c', command], {
+    const shell = shellSpawnArgs(command);
+    const child = spawn(shell.cmd, shell.args, {
       cwd,
       env: { ...process.env, HOME: this.workspaceRoot },
       stdio: ['pipe', 'pipe', 'pipe'],

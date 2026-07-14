@@ -20,8 +20,20 @@ export interface OrchestrateRunOptions {
   chatHistory: OrchestrateMessage[];
   workspaceId?: string;
   systemPrompt?: string;
+  /**
+   * watsonx Orchestrate server-side thread id. When set, it is sent as the
+   * X-IBM-THREAD-ID header so the platform keeps the conversation continuous
+   * — Orchestrate agents do NOT reliably honor client-replayed history, so
+   * this is the primary context mechanism.
+   */
+  threadId?: string;
   onEvent: (event: AgentEvent) => void;
   executeToolFn?: (toolName: any, args: any) => Promise<string>;
+}
+
+export interface OrchestrateRunResult {
+  /** Thread id returned by the platform — persist and reuse on the next turn */
+  threadId?: string;
 }
 
 export interface OrchestrateConfig {
@@ -46,6 +58,8 @@ export interface OrchestrateConfig {
  */
 export class OrchestrateClient {
   private readonly config: Required<OrchestrateConfig>;
+  /** thread_id observed in the most recent SSE/JSON payload (if any) */
+  private lastSeenThreadId?: string;
 
   constructor(config: OrchestrateConfig) {
     this.config = {
@@ -81,18 +95,32 @@ export class OrchestrateClient {
   /**
    * Run the Orchestrate agent and stream events back.
    * Supports both SSE and plain JSON responses.
+   *
+   * Context strategy: the Orchestrate chat/completions endpoint does NOT
+   * reliably honor client-replayed message history — the only dependable
+   * context mechanism is the platform's own thread (X-IBM-THREAD-ID header).
+   * We pass opts.threadId when we have one and return the thread id from the
+   * response so the caller can persist it per chat.
    */
-  async run(opts: OrchestrateRunOptions): Promise<void> {
+  async run(opts: OrchestrateRunOptions): Promise<OrchestrateRunResult> {
     if (!this.config.bearerToken && this.config.apiKey) {
       this.config.bearerToken = await this.getIamToken();
     }
 
     let iterations = 0;
     const maxIterations = 30;
+    let threadId: string | undefined = opts.threadId;
 
-    const chatHistory = [...opts.chatHistory];
-    
-    // Convert AgentTools to OpenAI function tools
+    // Messages for the NEXT request. With a server-side thread, we only send
+    // the new turn (the platform already holds prior context). Without one
+    // (first turn of a chat), we replay local history as a best effort.
+    let pendingMessages: any[] = [];
+    if (!threadId && opts.chatHistory.length > 0) {
+      pendingMessages.push(...opts.chatHistory);
+    }
+    pendingMessages.push({ role: 'user', content: opts.userMessage });
+
+    // Convert AgentTools to OpenAI function tools (some backends honor them)
     const tools = AGENT_TOOLS.map(t => ({
       type: 'function',
       function: {
@@ -101,9 +129,6 @@ export class OrchestrateClient {
         parameters: t.parameters,
       }
     }));
-
-    // Start with the initial user message if not already in history
-    chatHistory.push({ role: 'user', content: opts.userMessage });
 
     const cleanOrchestrateMessages = (msgs: any[]): any[] => {
       const result: any[] = [];
@@ -123,14 +148,14 @@ export class OrchestrateClient {
 
     while (iterations < maxIterations) {
       iterations++;
-      
+
       const rawMessages = [
-        ...(opts.systemPrompt
+        ...(opts.systemPrompt && !threadId
           ? [{ role: 'system', content: opts.systemPrompt }]
           : []),
-        ...chatHistory,
+        ...pendingMessages,
       ];
-      
+
       const body: any = {
         messages: cleanOrchestrateMessages(rawMessages),
         stream: true,
@@ -150,6 +175,7 @@ export class OrchestrateClient {
           headers: {
             'Content-Type': 'application/json',
             Accept: 'text/event-stream, application/json',
+            ...(threadId ? { 'X-IBM-THREAD-ID': threadId } : {}),
             ...this.authHeaders,
           },
           body: JSON.stringify(body),
@@ -164,6 +190,7 @@ export class OrchestrateClient {
         const contentType = response.headers.get('content-type') ?? '';
         let toolCalls: any[] = [];
         let assistantMessageContent = '';
+        let contentDoneEmitted = false;
 
         const trackingOnEvent = (event: AgentEvent) => {
           opts.onEvent(event);
@@ -171,6 +198,7 @@ export class OrchestrateClient {
             assistantMessageContent += (event.data as any).delta;
           } else if (event.type === 'content_done') {
             assistantMessageContent = (event.data as any).content || assistantMessageContent;
+            contentDoneEmitted = true;
           }
         };
 
@@ -179,6 +207,11 @@ export class OrchestrateClient {
         } else {
           const jsonRes = await this.handleJsonResponse(response, trackingOnEvent);
           toolCalls = jsonRes.toolCalls;
+          if (jsonRes.threadId) threadId = jsonRes.threadId;
+        }
+        if (this.lastSeenThreadId) {
+          threadId = this.lastSeenThreadId;
+          this.lastSeenThreadId = undefined;
         }
 
         // ── Fallback: model emitted a tool call as a markdown JSON block ──────
@@ -199,42 +232,96 @@ export class OrchestrateClient {
           }
         }
 
-        // If there are no tool calls, we are done
-        if (!toolCalls || toolCalls.length === 0 || !opts.executeToolFn) {
+        // ── Flow hijack detection ─────────────────────────────────────────────
+        // If the Orchestrate agent has a Flow attached in the platform console,
+        // a user utterance can trigger it and lock the conversation with a
+        // canned "A new flow has started..." message. Nothing client-side can
+        // dismiss it, so surface actionable guidance instead of a dead chat.
+        if (/a new flow has started/i.test(assistantMessageContent)) {
+          opts.onEvent({
+            type: 'agent_error',
+            data: {
+              error:
+                'The Orchestrate agent triggered a platform Flow, which locks this conversation. ' +
+                'Detach or disable Flows on this agent in the watsonx Orchestrate console ' +
+                '(Agent → Toolset → Flows) so chat requests are answered directly.',
+              code: 'ORCHESTRATE_FLOW_HIJACK',
+            },
+            timestamp: new Date(),
+          } as any);
           break;
         }
 
-        // Add assistant's message with tool calls to history
-        chatHistory.push({
-          role: 'assistant',
-          content: assistantMessageContent,
-          tool_calls: toolCalls,
-        });
+        // If there are no tool calls, we are done
+        if (!toolCalls || toolCalls.length === 0 || !opts.executeToolFn) {
+          // The SSE path only emits deltas — close the turn with an explicit
+          // content_done so the UI finalizes the streaming bubble.
+          if (!contentDoneEmitted) {
+            opts.onEvent({
+              type: 'content_done',
+              data: { content: assistantMessageContent },
+              timestamp: new Date(),
+            });
+          }
+          opts.onEvent({
+            type: 'status_update',
+            data: { status: 'done' },
+            timestamp: new Date(),
+          } as any);
+          break;
+        }
 
-        // Execute tools
+        // Execute tools, then send the results back as the next turn.
+        // Verified behavior: with X-IBM-THREAD-ID continuity the agent
+        // correctly consumes results delivered as plain user text
+        // ("[TOOL RESULT for <tool>]: ..."), so that is the format we use.
+        const toolResultMessages: any[] = [];
         for (const tc of toolCalls) {
+          opts.onEvent({
+            type: 'status_update',
+            data: { status: 'executing' },
+            timestamp: new Date(),
+          } as any);
           try {
             const args = JSON.parse(tc.function.arguments);
+            opts.onEvent({
+              type: 'tool_start',
+              data: { toolCallId: tc.id, toolName: tc.function.name, arguments: args },
+              timestamp: new Date(),
+            } as any);
+
             const result = await opts.executeToolFn(tc.function.name, args);
-            chatHistory.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              name: tc.function.name,
-              content: result,
+
+            opts.onEvent({
+              type: 'tool_end',
+              data: { toolCallId: tc.id, toolName: tc.function.name, output: result },
+              timestamp: new Date(),
+            } as any);
+
+            toolResultMessages.push({
+              role: 'user',
+              content: `[TOOL RESULT for ${tc.function.name}]: ${result}`,
             });
           } catch (err) {
-            chatHistory.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              name: tc.function.name,
-              content: `Error: ${String(err)}`,
+            const errorResult = `Error: ${String(err)}`;
+            opts.onEvent({
+              type: 'tool_end',
+              data: { toolCallId: tc.id, toolName: tc.function.name, output: errorResult },
+              timestamp: new Date(),
+            } as any);
+            toolResultMessages.push({
+              role: 'user',
+              content: `[TOOL RESULT for ${tc.function.name}]: ${errorResult}`,
             });
           }
         }
+        pendingMessages = toolResultMessages;
       } finally {
         clearTimeout(timeout);
       }
     }
+
+    return { threadId };
   }
 
   // ── SSE Streaming ──────────────────────────────────────────────────────────
@@ -286,8 +373,11 @@ export class OrchestrateClient {
   private async handleJsonResponse(
     response: Response,
     onEvent: (event: AgentEvent) => void,
-  ): Promise<{ toolCalls: any[] }> {
+  ): Promise<{ toolCalls: any[]; threadId?: string }> {
     const json = await response.json() as Record<string, unknown>;
+
+    // Capture the platform thread id for conversation continuity
+    const threadId = typeof json.thread_id === 'string' ? json.thread_id : undefined;
 
     // Check for tool calls in the JSON response
     const choices = json.choices as any[];
@@ -318,7 +408,7 @@ export class OrchestrateClient {
     if (toolCalls.length === 0) {
       onEvent({ type: 'status_update', data: { status: 'done' }, timestamp: new Date() });
     }
-    return { toolCalls };
+    return { toolCalls, threadId };
   }
 
   // ── SSE Event Parser ───────────────────────────────────────────────────────
@@ -326,6 +416,11 @@ export class OrchestrateClient {
   private parseAndEmit(raw: string, onEvent: (event: AgentEvent) => void, toolCallsBuffer: Map<number, any>): void {
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+      // Capture the platform thread id wherever it appears in the stream
+      if (typeof parsed.thread_id === 'string') {
+        this.lastSeenThreadId = parsed.thread_id;
+      }
 
       // IBM Orchestrate SSE shapes vary — handle the most common ones:
 

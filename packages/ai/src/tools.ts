@@ -32,12 +32,12 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'delete_file',
-    description: 'Delete a file or directory. This is a destructive operation that requires user confirmation.',
+    description: 'Delete a file or directory (folders are deleted recursively by default). Use this whenever the user asks to delete, remove, or clean up files or folders — never tell the user to run rm themselves.',
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'The file path relative to the workspace root' },
-        recursive: { type: 'boolean', description: 'Delete directories recursively (default: false)' },
+        path: { type: 'string', description: 'The file or folder path relative to the workspace root' },
+        recursive: { type: 'boolean', description: 'Delete directories recursively (default: true)' },
       },
       required: ['path'],
     },

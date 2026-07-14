@@ -162,7 +162,8 @@ export type AgentEventType =
   | 'agent_done'
   | 'agent_error'
   | 'permission_request'
-  | 'status_update';
+  | 'status_update'
+  | 'chat_info';
 
 export interface AgentEvent {
   type: AgentEventType;
@@ -181,7 +182,8 @@ export type AgentEventData =
   | AgentDoneEvent
   | AgentErrorEvent
   | PermissionRequestEvent
-  | StatusUpdateEvent;
+  | StatusUpdateEvent
+  | ChatInfoEvent;
 
 export interface ThinkingEvent {
   text: string;
@@ -236,6 +238,10 @@ export interface PermissionRequestEvent {
 export interface StatusUpdateEvent {
   status: AgentStatus;
   message?: string;
+}
+
+export interface ChatInfoEvent {
+  chatId: string;
 }
 
 // ── Task ──────────────────────────────────────────────────────────────────────

@@ -67,7 +67,10 @@ export const RATE_LIMITS = {
   agent: { windowMs: 1 * 60 * 1000, max: 10 },
 };
 
-export const PERMISSION_TIMEOUT_MS = 30000;
+// Permission dialogs auto-deny on timeout; 30s was short enough that users
+// reading the dialog got denied mid-decision, making destructive tools appear
+// broken. 5 minutes gives a human time to respond.
+export const PERMISSION_TIMEOUT_MS = 300_000;
 
 export const EMBEDDING_DIMENSIONS = 384;
 export const MAX_EMBEDDING_BATCH = 100;

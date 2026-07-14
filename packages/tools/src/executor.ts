@@ -71,7 +71,10 @@ export class ToolExecutor {
       case 'delete_file': {
         return await this.fs.deleteFile(
           args.path as string,
-          (args.recursive as boolean) ?? false,
+          // Default recursive: models frequently omit it when the user asks
+          // to delete a folder, and the operation is already sandboxed to
+          // the workspace and confirmation-gated.
+          (args.recursive as boolean) ?? true,
         );
       }
 
