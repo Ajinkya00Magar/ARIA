@@ -1,0 +1,71 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Super IDE Agent Tools",
+    "version": "2.0.0",
+    "description": "Full suite of IDE tools for autonomous agents: command execution, file system manipulation, directory listing, and codebase search."
+  },
+  "servers": [
+    {
+      "url": "https://YOUR_IBM_CLOUD_APP_URL.appdomain.cloud",
+      "description": "IBM Cloud Code Engine Deployment"
+    }
+  ],
+  "paths": {
+    "/run_command": {
+      "post": {
+        "operationId": "runCommand",
+        "summary": "Run a terminal command",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "command": { "type": "string" }, "cwd": { "type": "string" } }, "required": ["command"] } } }
+        },
+        "responses": { "200": { "description": "Command result" } }
+      }
+    },
+    "/read_file": {
+      "post": {
+        "operationId": "readFile",
+        "summary": "Read a file from disk",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } } }
+        },
+        "responses": { "200": { "description": "File content" } }
+      }
+    },
+    "/write_file": {
+      "post": {
+        "operationId": "writeFile",
+        "summary": "Write or overwrite a file",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } }, "required": ["path", "content"] } } }
+        },
+        "responses": { "200": { "description": "Success status" } }
+      }
+    },
+    "/list_dir": {
+      "post": {
+        "operationId": "listDir",
+        "summary": "List contents of a directory",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "path": { "type": "string", "description": "Directory path (defaults to current dir)" } } } } }
+        },
+        "responses": { "200": { "description": "Directory contents" } }
+      }
+    },
+    "/grep_search": {
+      "post": {
+        "operationId": "grepSearch",
+        "summary": "Search codebase for a text pattern",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "query": { "type": "string" }, "searchPath": { "type": "string" } }, "required": ["query"] } } }
+        },
+        "responses": { "200": { "description": "Search results" } }
+      }
+    }
+  }
+}

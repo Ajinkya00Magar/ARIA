@@ -22,7 +22,7 @@ interface IamTokenResponse {
 
 interface WatsonxChatRequest {
   model_id: string;
-  messages: any[];
+  messages: WatsonxMessage[];
   tools?: WatsonxToolSpec[];
   tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
   parameters?: {
@@ -135,30 +135,6 @@ export class WatsonxClient {
     return { Authorization: `Bearer ${token}` };
   }
 
-  private mapMessageToApi(msg: WatsonxMessage): any {
-    const apiMsg: any = {
-      role: msg.role,
-      content: msg.content,
-    };
-    if (msg.name) {
-      apiMsg.name = msg.name;
-    }
-    if (msg.toolCallId) {
-      apiMsg.tool_call_id = msg.toolCallId;
-    }
-    if (msg.toolCalls && msg.toolCalls.length > 0) {
-      apiMsg.tool_calls = msg.toolCalls.map((tc) => ({
-        id: tc.id,
-        type: tc.type,
-        function: {
-          name: tc.function.name,
-          arguments: tc.function.arguments,
-        },
-      }));
-    }
-    return apiMsg;
-  }
-
   // ── Non-streaming Chat ────────────────────────────────────────────────────────
 
   async chat(
@@ -170,11 +146,12 @@ export class WatsonxClient {
     const body: WatsonxChatRequest = {
       model_id: this.config.modelId,
       project_id: this.config.projectId,
-      messages: messages.map((msg) => this.mapMessageToApi(msg)),
+      messages,
       parameters: {
         temperature: options?.temperature ?? this.config.parameters?.temperature ?? 0.2,
         max_new_tokens: options?.maxNewTokens ?? this.config.parameters?.maxNewTokens ?? 4096,
         top_p: options?.topP ?? this.config.parameters?.topP ?? 0.95,
+        repetition_penalty: options?.repetitionPenalty ?? 1.0,
       },
     };
 
@@ -210,12 +187,13 @@ export class WatsonxClient {
     const body: WatsonxChatRequest = {
       model_id: this.config.modelId,
       project_id: this.config.projectId,
-      messages: messages.map((msg) => this.mapMessageToApi(msg)),
+      messages,
       stream: true,
       parameters: {
         temperature: options?.temperature ?? this.config.parameters?.temperature ?? 0.2,
         max_new_tokens: options?.maxNewTokens ?? this.config.parameters?.maxNewTokens ?? 4096,
         top_p: options?.topP ?? 0.95,
+        repetition_penalty: 1.0,
       },
     };
 
@@ -224,34 +202,10 @@ export class WatsonxClient {
       body.tool_choice = 'auto';
     }
 
-    let response;
-    try {
-      response = await this.http.post('/ml/v1/text/chat_stream?version=2024-05-31', body, {
-        headers: { ...authHeaders, Accept: 'text/event-stream' },
-        responseType: 'stream',
-      });
-    } catch (err: any) {
-      if (axios.isAxiosError(err)) {
-        let errorData = '';
-        const responseData = err.response?.data;
-        if (responseData) {
-          if (typeof responseData.on === 'function') {
-            errorData = await new Promise<string>((resolve) => {
-              let chunk = '';
-              responseData.on('data', (d: Buffer) => { chunk += d.toString(); });
-              responseData.on('end', () => resolve(chunk));
-              responseData.on('error', () => resolve(''));
-            });
-          } else {
-            errorData = typeof responseData === 'string' ? responseData : JSON.stringify(responseData);
-          }
-        }
-        const errorMsg = errorData || err.message;
-        console.error("Watsonx stream post error:", errorMsg);
-        throw new Error(`Watsonx stream failed: ${errorMsg}`);
-      }
-      throw err;
-    }
+    const response = await this.http.post('/ml/v1/text/chat_stream?version=2024-05-31', body, {
+      headers: { ...authHeaders, Accept: 'text/event-stream' },
+      responseType: 'stream',
+    });
 
     const stream = response.data as NodeJS.ReadableStream;
     const queue: WatsonxStreamChunk[] = [];

@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { AgentEvent, ToolCall } from '@ibm-agent/types';
-import { AGENT_TOOLS, extractToolCallsFromText } from '@ibm-agent/ai';
+import { AGENT_TOOLS } from '@ibm-agent/ai';
 
 export interface OrchestrateMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -179,24 +179,6 @@ export class OrchestrateClient {
         } else {
           const jsonRes = await this.handleJsonResponse(response, trackingOnEvent);
           toolCalls = jsonRes.toolCalls;
-        }
-
-        // ── Fallback: model emitted a tool call as a markdown JSON block ──────
-        // Granite sometimes skips the native tool_calls API and prints the
-        // arguments as ```json ... ``` text. Parse those blocks, validate them
-        // against AGENT_TOOLS, and synthesize tool calls so they still execute.
-        if ((!toolCalls || toolCalls.length === 0) && opts.executeToolFn && assistantMessageContent) {
-          const extraction = extractToolCallsFromText(assistantMessageContent);
-          if (extraction.toolCalls.length > 0) {
-            toolCalls = extraction.toolCalls;
-            assistantMessageContent = extraction.cleanedContent;
-            // Re-emit the cleaned content so the chat UI drops the raw JSON block
-            opts.onEvent({
-              type: 'content_done',
-              data: { content: extraction.cleanedContent },
-              timestamp: new Date(),
-            });
-          }
         }
 
         // If there are no tool calls, we are done

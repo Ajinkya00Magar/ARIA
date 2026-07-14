@@ -25,9 +25,7 @@ filesRouter.get('/:workspaceId/tree', async (req: Request, res: Response) => {
 filesRouter.get('/:workspaceId/list', async (req: Request, res: Response) => {
   const ws = await workspaceService.findById((req.params.workspaceId as string), req.user!.sub);
   const filePath = (req.query.path as string) ?? '.';
-  const recursive = req.query.recursive !== 'false'; // default: full tree for the explorer
-  const maxDepth = Number(req.query.maxDepth) || 8;
-  const files = await getFs(ws.path).listFiles(filePath, recursive, false, maxDepth);
+  const files = await getFs(ws.path).listFiles(filePath, false);
   res.json({ success: true, data: files });
 });
 

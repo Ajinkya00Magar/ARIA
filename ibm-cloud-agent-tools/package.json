@@ -1,0 +1,12 @@
+{
+  "name": "ibm-cloud-agent-tools",
+  "version": "1.0.0",
+  "description": "Full IDE capabilities for IBM Orchestrate agent",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
