@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { eq } from 'drizzle-orm';
-import { CodingAgent, WatsonxClient, MemoryManager } from '@ibm-agent/ai';
+import { CodingAgent, WatsonxClient, MemoryManager, buildSystemPrompt } from '@ibm-agent/ai';
 import { ToolExecutor } from '@ibm-agent/tools';
 import { generateId, createConsoleLogger } from '@ibm-agent/shared';
 import type { AgentEvent, ProjectSummary, ToolName } from '@ibm-agent/types';
@@ -121,12 +121,6 @@ class AgentService {
     }));
 
     // ── Choose agent backend ───────────────────────────────────────────────
-    // KEY ROUTING RULE:
-    // • When a workspace is open → ALWAYS use local CodingAgent + ToolExecutor.
-    //   This is the only path that can actually write files, run commands, etc.
-    //   IBM Orchestrate is a remote cloud LLM — it cannot call our local file tools.
-    // • When NO workspace is open → use IBM Orchestrate (if configured) for Q&A,
-    //   otherwise fall back to local watsonx CodingAgent.
     let finalContent = '';
 
     const executor = ws
@@ -141,9 +135,37 @@ class AgentService {
         })
       : undefined;
 
-    if (ws && executor) {
+    if (this.orchestrate) {
+      logger.info(
+        ws
+          ? `🤖 Routing to IBM Orchestrate with local workspace tools: ${ws.path}`
+          : '🤖 Routing to IBM Orchestrate (no workspace — Q&A mode)'
+      );
+      await this.orchestrate.run({
+        userMessage: opts.userMessage,
+        chatHistory: chatHistory.slice(0, -1).map((m) => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content,
+        })),
+        workspaceId: opts.workspaceId,
+        systemPrompt: ws
+          ? buildSystemPrompt(ws.projectSummary as ProjectSummary | null, [])
+          : 'You are an expert IBM Coding Agent. Help the user with any coding, architecture, or software engineering task. When the user wants to write or create files, remind them to open a workspace first.',
+        executeToolFn: ws && executor ? async (toolName, args) => {
+          return executor.execute(toolName, args);
+        } : undefined,
+        onEvent: (event) => {
+          opts.onEvent(event);
+          if (event.type === 'content_done') {
+            finalContent = (event.data as { content: string }).content;
+          }
+          if (event.type === 'content_delta') {
+            finalContent += (event.data as { delta: string }).delta;
+          }
+        },
+      });
+    } else if (ws && executor) {
       // ── LOCAL CodingAgent with real ToolExecutor (workspace open) ─────────
-      // This is the ONLY path that actually creates files, runs commands, etc.
       const projectSummary = ws.projectSummary as ProjectSummary | null;
       logger.info(`⚡ Running local CodingAgent for workspace: ${ws.path}`);
 
@@ -174,27 +196,6 @@ class AgentService {
             details,
             opts.onEvent,
           );
-        },
-      });
-    } else if (this.orchestrate) {
-      // ── IBM Orchestrate — no workspace, Q&A only ───────────────────────────
-      logger.info('🤖 Routing to IBM Orchestrate (no workspace — Q&A mode)');
-      await this.orchestrate.run({
-        userMessage: opts.userMessage,
-        chatHistory: chatHistory.slice(0, -1).map((m) => ({
-          role: m.role as 'user' | 'assistant' | 'system',
-          content: m.content,
-        })),
-        workspaceId: opts.workspaceId,
-        systemPrompt: 'You are an expert IBM Coding Agent. Help the user with any coding, architecture, or software engineering task. When the user wants to write or create files, remind them to open a workspace first.',
-        onEvent: (event) => {
-          opts.onEvent(event);
-          if (event.type === 'content_done') {
-            finalContent = (event.data as { content: string }).content;
-          }
-          if (event.type === 'content_delta') {
-            finalContent += (event.data as { delta: string }).delta;
-          }
         },
       });
     } else {
