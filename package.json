@@ -1,22 +1,20 @@
 {
-  "name": "ibm-coding-agent",
+  "name": "smart-home-energy-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "Production-ready AI Coding Agent powered by IBM watsonx.ai",
+  "description": "ARIA IDE - AI Coding Agent Desktop Application",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=!@ibm-agent/landing",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rm -rf node_modules",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "db:migrate": "npm run db:migrate --workspace=apps/api",
-    "db:seed": "npm run db:seed --workspace=apps/api"
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

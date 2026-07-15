@@ -136,3 +136,8 @@ ibm-credentials.env
 # Local SQLite database (chat history, workspaces — machine-local state)
 local.db
 *.db-journal
+
+# Desktop build artifacts
+apps/desktop/bundle/
+apps/desktop/dist/
+apps/web/out/

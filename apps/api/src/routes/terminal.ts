@@ -1,20 +1,33 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Terminal Router
+// Terminal Router — sessions are in-memory only (the live terminal is the
+// socket.io PTY in lib/terminal-socket.ts; these REST sessions are legacy)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { workspaceService } from '../services/workspace.service';
 import { TerminalTool } from '@ibm-agent/tools';
-import { getDb } from '../db/connection';
-import { terminalSessions } from '../db/schema';
-import { eq, and } from 'drizzle-orm';
 import { generateId } from '@ibm-agent/shared';
 
 export const terminalRouter = Router();
 terminalRouter.use(authenticate);
 
 const runningProcesses = new Map<string, TerminalTool>();
+
+interface TerminalSession {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  name: string;
+  status: string;
+  cwd: string;
+  output: unknown[];
+  createdAt: string;
+}
+
+// In-memory session store — cleared on app restart, which is fine for a
+// local desktop terminal
+const sessions = new Map<string, TerminalSession>();
 
 function getTerminal(workspaceId: string, workspacePath: string): TerminalTool {
   if (!runningProcesses.has(workspaceId)) {
@@ -27,47 +40,40 @@ function getTerminal(workspaceId: string, workspacePath: string): TerminalTool {
 }
 
 // GET /api/terminal/:workspaceId/sessions
-terminalRouter.get('/:workspaceId/sessions', async (req: Request, res: Response) => {
-  const db = getDb();
+terminalRouter.get('/:workspaceId/sessions', (req: Request, res: Response) => {
   const { workspaceId } = req.params as { workspaceId: string };
-  const sessions = await db
-    .select()
-    .from(terminalSessions)
-    .where(and(eq(terminalSessions.workspaceId, workspaceId), eq(terminalSessions.userId, req.user!.sub)))
-    .orderBy(terminalSessions.createdAt);
-  res.json({ success: true, data: sessions });
+  const items = [...sessions.values()]
+    .filter((s) => s.workspaceId === workspaceId && s.userId === req.user!.sub)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  res.json({ success: true, data: items });
 });
 
 // POST /api/terminal/:workspaceId/sessions
 terminalRouter.post('/:workspaceId/sessions', async (req: Request, res: Response) => {
   const { workspaceId } = req.params as { workspaceId: string };
   const ws = await workspaceService.findById(workspaceId, req.user!.sub);
-  const db = getDb();
-  const [session] = await db
-    .insert(terminalSessions)
-    .values({
-      id: generateId(),
-      workspaceId: ws.id,
-      userId: req.user!.sub,
-      name: req.body.name || 'Terminal',
-      cwd: ws.path,
-      output: [],
-    })
-    .returning();
+  const session: TerminalSession = {
+    id: generateId(),
+    workspaceId: ws.id,
+    userId: req.user!.sub,
+    name: req.body.name || 'Terminal',
+    status: 'idle',
+    cwd: ws.path,
+    output: [],
+    createdAt: new Date().toISOString(),
+  };
+  sessions.set(session.id, session);
   res.json({ success: true, data: session });
 });
 
 // PUT /api/terminal/:workspaceId/sessions/:id/output
-terminalRouter.put('/:workspaceId/sessions/:id/output', async (req: Request, res: Response) => {
+terminalRouter.put('/:workspaceId/sessions/:id/output', (req: Request, res: Response) => {
   const { id } = req.params as { id: string };
-  const db = getDb();
-  const { output } = req.body;
-  const [session] = await db
-    .update(terminalSessions)
-    .set({ output })
-    .where(and(eq(terminalSessions.id, id), eq(terminalSessions.userId, req.user!.sub)))
-    .returning();
-  res.json({ success: true, data: session });
+  const session = sessions.get(id);
+  if (session && session.userId === req.user!.sub) {
+    session.output = req.body.output ?? [];
+  }
+  res.json({ success: true, data: session ?? null });
 });
 
 // POST /api/terminal/:workspaceId/exec

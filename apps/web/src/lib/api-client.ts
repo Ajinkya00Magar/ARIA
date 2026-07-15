@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const BASE_URL =
   (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_API_URL : process.env.API_URL) ??
-  'http://localhost:3001';
+  'http://127.0.0.1:3001';
 
 export const apiClient = axios.create({
   baseURL: `${BASE_URL}/api`,
@@ -31,18 +31,10 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 — clear auth and redirect to login
+// Local desktop app — no auth. Kept as a passthrough for error logging.
 apiClient.interceptors.response.use(
   (res) => res,
-  (err) => {
-    if (err?.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('ibm-agent-auth');
-      if (!window.location.pathname.startsWith('/login')) {
-        window.location.href = '/login';
-      }
-    }
-    return Promise.reject(err);
-  },
+  (err) => Promise.reject(err),
 );
 
 export default apiClient;

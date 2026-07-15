@@ -3,16 +3,17 @@
   "globalEnv": [
     "NODE_ENV",
     "PORT",
-    "DATABASE_URL",
     "IBM_CLOUD_API_KEY",
     "IBM_PROJECT_ID",
     "IBM_WATSONX_URL",
-    "JWT_SECRET"
+    "IBM_ORCHESTRATE_URL",
+    "IBM_ORCHESTRATE_API_KEY",
+    "USE_ORCHESTRATE"
   ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "out/**", "!.next/cache/**"]
     },
     "dev": {
       "cache": false,

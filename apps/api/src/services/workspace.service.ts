@@ -1,210 +1,176 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Workspace Service
+// Workspace Service — direct folder access (no database).
+// A "workspace" is simply a folder on disk registered in the recents list.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import fs from 'fs/promises';
 import path from 'path';
-import { eq, and, desc } from 'drizzle-orm';
 import type { Workspace } from '@ibm-agent/types';
-import { NotFoundError, AuthorizationError, WorkspaceError, generateId } from '@ibm-agent/shared';
-import { getDb } from '../db/connection';
-import { workspaces, workspaceMembers } from '../db/schema';
-import { GitTool } from '@ibm-agent/tools';
-import { ProjectAnalyzer } from '@ibm-agent/tools';
-import { env } from '../lib/env';
+import { NotFoundError, WorkspaceError, generateId } from '@ibm-agent/shared';
+import { GitTool, ProjectAnalyzer } from '@ibm-agent/tools';
 import type { CreateWorkspaceInput, UpdateWorkspaceInput } from '@ibm-agent/shared';
+import {
+  listWorkspaceRecords,
+  updateWorkspaceRecords,
+  type WorkspaceRecord,
+} from '../lib/store';
 
 export class WorkspaceService {
-  private getWorkspacePath(workspaceId: string): string {
-    return path.join(env.WORKSPACE_ROOT, workspaceId);
-  }
-
+  /**
+   * Open (or create) a folder as a workspace.
+   * - input.path provided + exists → open that folder directly
+   * - input.path provided + missing → create the folder (optionally git clone)
+   * - no path → error: the desktop app always sends a folder picked by the user
+   */
   async create(userId: string, input: CreateWorkspaceInput): Promise<Workspace> {
-    console.log("WorkspaceService.create called with", {userId, input});
-    const db = getDb();
-    console.log("Got DB");
-    const workspaceId = generateId();
-    let workspacePath = this.getWorkspacePath(workspaceId);
-    let isExisting = false;
+    if (!input.path) {
+      throw new WorkspaceError('A folder path is required. Use "Open Folder" to pick a directory.');
+    }
 
-    if (input.path) {
-      console.log("Resolving custom path:", input.path);
-      workspacePath = path.resolve(input.path);
-      try {
-        const stats = await fs.stat(workspacePath);
-        if (stats.isDirectory()) {
-          console.log("Custom path exists as directory");
-          isExisting = true;
-        }
-      } catch (err) {
-        console.log("Custom path does not exist, will create");
-      }
+    const workspacePath = path.resolve(input.path);
+    let isExisting = false;
+    try {
+      const stats = await fs.stat(workspacePath);
+      if (stats.isDirectory()) isExisting = true;
+      else throw new WorkspaceError(`Path exists but is not a directory: ${workspacePath}`);
+    } catch (err) {
+      if (err instanceof WorkspaceError) throw err;
+      // Folder doesn't exist — create it below
     }
 
     if (!isExisting) {
-      console.log("Creating directory:", workspacePath);
       await fs.mkdir(workspacePath, { recursive: true });
-
       if (input.gitUrl) {
-        console.log("Cloning from Git");
         try {
           const git = new GitTool(path.dirname(workspacePath));
           await git.clone(input.gitUrl, workspacePath, input.gitBranch);
         } catch (err) {
-          console.error("Git clone failed", err);
           await fs.rm(workspacePath, { recursive: true, force: true });
           throw new WorkspaceError(`Failed to clone repository: ${String(err)}`);
         }
-      } else {
-        console.log("Initializing Git");
-        const git = new GitTool(workspacePath);
-        await git.init();
-        console.log("Git initialized");
       }
     }
 
-    console.log("Inserting into workspaces table");
-    const [ws] = await db
-      .insert(workspaces)
-      .values({
-        id: workspaceId,
-        name: input.name,
-        description: input.description,
-        ownerId: userId,
-        path: workspacePath,
-        gitUrl: input.gitUrl,
-        gitBranch: input.gitBranch ?? 'main',
-      })
-      .returning();
+    // If this folder is already registered, just reopen it (no duplicates)
+    const existingRecords = await listWorkspaceRecords();
+    const existing = existingRecords.find((r) => path.resolve(r.path) === workspacePath);
+    if (existing) {
+      await this.updateLastOpened(existing.id);
+      return this.mapToWorkspace({ ...existing, lastOpenedAt: new Date().toISOString() });
+    }
 
-    // Add owner as member
-    await db.insert(workspaceMembers).values({
-      workspaceId: ws.id,
-      userId,
-      role: 'admin',
+    const now = new Date().toISOString();
+    const record: WorkspaceRecord = {
+      id: generateId(),
+      name: input.name || path.basename(workspacePath),
+      description: input.description,
+      ownerId: userId,
+      path: workspacePath,
+      gitUrl: input.gitUrl,
+      gitBranch: input.gitBranch ?? 'main',
+      status: 'active',
+      isPinned: false,
+      lastOpenedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await updateWorkspaceRecords((records) => {
+      records.unshift(record);
     });
 
-    return this.mapToWorkspace(ws);
+    return this.mapToWorkspace(record);
   }
 
-  async findAll(userId: string): Promise<Workspace[]> {
-    const db = getDb();
-    const result = await db
-      .select({ ws: workspaces })
-      .from(workspaces)
-      .innerJoin(
-        workspaceMembers,
-        and(
-          eq(workspaceMembers.workspaceId, workspaces.id),
-          eq(workspaceMembers.userId, userId),
-        ),
-      )
-      .orderBy(desc(workspaces.lastOpenedAt), desc(workspaces.updatedAt));
-
-    return result.map((r) => this.mapToWorkspace(r.ws));
+  async findAll(_userId: string): Promise<Workspace[]> {
+    const records = await listWorkspaceRecords();
+    // Drop entries whose folder no longer exists on disk
+    const alive: WorkspaceRecord[] = [];
+    for (const r of records) {
+      try {
+        const stats = await fs.stat(r.path);
+        if (stats.isDirectory()) alive.push(r);
+      } catch {
+        // folder was deleted/moved — hide from recents
+      }
+    }
+    alive.sort((a, b) => (b.lastOpenedAt ?? b.updatedAt).localeCompare(a.lastOpenedAt ?? a.updatedAt));
+    return alive.map((r) => this.mapToWorkspace(r));
   }
 
-  async findById(workspaceId: string, userId: string): Promise<Workspace> {
-    const db = getDb();
-    const [result] = await db
-      .select({ ws: workspaces })
-      .from(workspaces)
-      .innerJoin(
-        workspaceMembers,
-        and(
-          eq(workspaceMembers.workspaceId, workspaces.id),
-          eq(workspaceMembers.userId, userId),
-        ),
-      )
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
-
-    if (!result) throw new NotFoundError('Workspace');
-    return this.mapToWorkspace(result.ws);
+  async findById(workspaceId: string, _userId: string): Promise<Workspace> {
+    const records = await listWorkspaceRecords();
+    const record = records.find((r) => r.id === workspaceId);
+    if (!record) throw new NotFoundError('Workspace');
+    return this.mapToWorkspace(record);
   }
 
   async update(workspaceId: string, userId: string, input: UpdateWorkspaceInput): Promise<Workspace> {
-    await this.findById(workspaceId, userId); // access check
-
-    const db = getDb();
-    const [ws] = await db
-      .update(workspaces)
-      .set({ ...input, updatedAt: new Date() })
-      .where(eq(workspaces.id, workspaceId))
-      .returning();
-
-    return this.mapToWorkspace(ws);
+    await this.findById(workspaceId, userId); // existence check
+    let updated: WorkspaceRecord | undefined;
+    await updateWorkspaceRecords((records) => {
+      const record = records.find((r) => r.id === workspaceId);
+      if (record) {
+        Object.assign(record, input, { updatedAt: new Date().toISOString() });
+        updated = record;
+      }
+    });
+    if (!updated) throw new NotFoundError('Workspace');
+    return this.mapToWorkspace(updated);
   }
 
-  async delete(workspaceId: string, userId: string): Promise<void> {
-    const db = getDb();
-    const [ws] = await db
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
-
-    if (!ws) throw new NotFoundError('Workspace');
-    if (ws.ownerId !== userId) throw new AuthorizationError('Only workspace owner can delete');
-
-    // Delete physical files
-    try {
-      await fs.rm(ws.path, { recursive: true, force: true });
-    } catch {
-      // Log but continue with DB delete
-    }
-
-    await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
+  /**
+   * Remove a workspace from the recents list.
+   * NEVER deletes the actual folder — it belongs to the user.
+   */
+  async delete(workspaceId: string, _userId: string): Promise<void> {
+    await updateWorkspaceRecords((records) => records.filter((r) => r.id !== workspaceId));
   }
 
   async pin(workspaceId: string, userId: string, pin: boolean): Promise<Workspace> {
-    await this.findById(workspaceId, userId);
-    const db = getDb();
-    const [ws] = await db
-      .update(workspaces)
-      .set({ isPinned: pin })
-      .where(eq(workspaces.id, workspaceId))
-      .returning();
-    return this.mapToWorkspace(ws);
+    return this.update(workspaceId, userId, { isPinned: pin } as UpdateWorkspaceInput);
   }
 
   async analyze(workspaceId: string, userId: string): Promise<object> {
     const ws = await this.findById(workspaceId, userId);
-    const db = getDb();
-
     const analyzer = new ProjectAnalyzer(ws.path);
     const summary = await analyzer.analyze();
 
-    await db
-      .update(workspaces)
-      .set({ projectSummary: summary as unknown as object })
-      .where(eq(workspaces.id, workspaceId));
+    await updateWorkspaceRecords((records) => {
+      const record = records.find((r) => r.id === workspaceId);
+      if (record) record.projectSummary = summary;
+    });
 
     return summary;
   }
 
   async updateLastOpened(workspaceId: string): Promise<void> {
-    const db = getDb();
-    await db
-      .update(workspaces)
-      .set({ lastOpenedAt: new Date() })
-      .where(eq(workspaces.id, workspaceId));
+    await updateWorkspaceRecords((records) => {
+      const record = records.find((r) => r.id === workspaceId);
+      if (record) record.lastOpenedAt = new Date().toISOString();
+    });
   }
 
-  private mapToWorkspace(ws: typeof workspaces.$inferSelect): Workspace {
+  /** Resolve a workspace's project summary (used by the agent). */
+  async getRecord(workspaceId: string): Promise<WorkspaceRecord | undefined> {
+    const records = await listWorkspaceRecords();
+    return records.find((r) => r.id === workspaceId);
+  }
+
+  private mapToWorkspace(r: WorkspaceRecord): Workspace {
     return {
-      id: ws.id,
-      name: ws.name,
-      description: ws.description ?? undefined,
-      ownerId: ws.ownerId,
-      path: ws.path,
-      gitUrl: ws.gitUrl ?? undefined,
-      gitBranch: ws.gitBranch ?? undefined,
-      status: ws.status as Workspace['status'],
-      isPinned: ws.isPinned,
-      lastOpenedAt: ws.lastOpenedAt ?? undefined,
-      createdAt: ws.createdAt,
-      updatedAt: ws.updatedAt,
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      ownerId: r.ownerId,
+      path: r.path,
+      gitUrl: r.gitUrl,
+      gitBranch: r.gitBranch,
+      status: r.status as Workspace['status'],
+      isPinned: r.isPinned,
+      lastOpenedAt: r.lastOpenedAt ? new Date(r.lastOpenedAt) : undefined,
+      createdAt: new Date(r.createdAt),
+      updatedAt: new Date(r.updatedAt),
     };
   }
 }

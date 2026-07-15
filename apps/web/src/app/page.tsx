@@ -7,12 +7,13 @@ export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/dashboard');
+    // Land on the folder hub first — the user picks a folder to work in
+    router.replace('/workspace');
   }, [router]);
 
   return (
     <div className="flex h-full items-center justify-center">
-      <div className="animate-pulse text-muted-foreground text-sm">Loading IBM Coding Agent…</div>
+      <div className="animate-pulse text-muted-foreground text-sm">Loading ARIA IDE…</div>
     </div>
   );
 }

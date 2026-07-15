@@ -4,13 +4,12 @@
 // otherwise falls back to the CodingAgent (watsonx).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { eq } from 'drizzle-orm';
 import { CodingAgent, WatsonxClient, MemoryManager, buildSystemPrompt } from '@ibm-agent/ai';
 import { ToolExecutor } from '@ibm-agent/tools';
 import { generateId, createConsoleLogger } from '@ibm-agent/shared';
 import type { AgentEvent, ProjectSummary, ToolName } from '@ibm-agent/types';
-import { getDb } from '../db/connection';
-import { chats, messages, workspaces } from '../db/schema';
+import { workspaceService } from './workspace.service';
+import { getChat, updateChats, type ChatRecord } from '../lib/store';
 import { env } from '../lib/env';
 import { permissionService } from './permission.service';
 import { OrchestrateClient } from './orchestrate.client';
@@ -64,45 +63,51 @@ class AgentService {
   }
 
   async run(opts: AgentRunOptions): Promise<void> {
-    const db = getDb();
-
     // ── Load workspace (optional — allow chat without a workspace) ─────────
     let ws: { id: string; path: string; projectSummary: unknown } | undefined;
     if (opts.workspaceId) {
-      const [found] = await db
-        .select()
-        .from(workspaces)
-        .where(eq(workspaces.id, opts.workspaceId))
-        .limit(1);
-      ws = found;
+      const record = await workspaceService.getRecord(opts.workspaceId);
+      if (record) {
+        ws = { id: record.id, path: record.path, projectSummary: record.projectSummary };
+      }
     }
 
-    // ── Load or create chat (skip if no workspace — notNull constraint) ──────
+    // ── Load or create chat, persist user message into <folder>/.aria ───────
+    // Chat history is saved automatically as soon as the first prompt is
+    // given inside an open folder.
     let chatRow: { id: string; orchestrateThreadId?: string | null } | undefined;
-    if (opts.workspaceId) {
-      if (opts.chatId) {
-        const [found] = await db.select().from(chats).where(eq(chats.id, opts.chatId)).limit(1);
-        chatRow = found;
-      }
-      if (!chatRow) {
-        const [inserted] = await db
-          .insert(chats)
-          .values({
-            id: opts.chatId || generateId(),
+    if (ws) {
+      const wsPath = ws.path;
+      const existing = opts.chatId ? await getChat(wsPath, opts.chatId) : undefined;
+      const chatId = existing?.id ?? (opts.chatId || generateId());
+      const now = new Date().toISOString();
+
+      await updateChats(wsPath, (chats) => {
+        let chat = chats.find((c) => c.id === chatId);
+        if (!chat) {
+          chat = {
+            id: chatId,
             workspaceId: opts.workspaceId,
             userId: opts.userId,
             title: opts.userMessage.slice(0, 80),
-          })
-          .returning();
-        chatRow = inserted;
-      }
-      // Save user message to DB
-      await db.insert(messages).values({
-        id: generateId(),
-        chatId: chatRow!.id,
-        role: 'user',
-        content: opts.userMessage,
+            createdAt: now,
+            updatedAt: now,
+            messages: [],
+          };
+          chats.push(chat);
+        }
+        chat.messages.push({
+          id: generateId(),
+          chatId,
+          role: 'user',
+          content: opts.userMessage,
+          createdAt: now,
+        });
+        chat.updatedAt = now;
       });
+
+      const saved = await getChat(wsPath, chatId);
+      chatRow = { id: chatId, orchestrateThreadId: saved?.orchestrateThreadId ?? null };
     } else {
       // No workspace — use an ephemeral chat ID (not persisted)
       chatRow = { id: opts.chatId || generateId() };
@@ -117,15 +122,10 @@ class AgentService {
     });
 
     // ── Load chat history ──────────────────────────────────────────────────
-    // Secondary sort on id: createdAt has second granularity in SQLite, so
-    // same-second messages can reorder without it.
-    const historyRows = opts.workspaceId && chatRow
-      ? await db
-          .select()
-          .from(messages)
-          .where(eq(messages.chatId, chatRow.id))
-          .orderBy(messages.createdAt, messages.id)
-      : [];
+    const savedChat: ChatRecord | undefined = ws
+      ? await getChat(ws.path, chatRow.id)
+      : undefined;
+    const historyRows = savedChat?.messages ?? [];
 
     const chatHistory = historyRows.map((m) => ({
       id: m.id,
@@ -134,7 +134,7 @@ class AgentService {
       content: m.content,
       toolCalls: m.toolCalls as never,
       toolResults: m.toolResults as never,
-      createdAt: m.createdAt,
+      createdAt: new Date(m.createdAt),
     }));
 
     // ── Choose agent backend ───────────────────────────────────────────────
@@ -229,14 +229,18 @@ class AgentService {
       // server-side conversation (this is what gives Aria her memory).
       if (
         result.threadId &&
-        opts.workspaceId &&
+        ws &&
         chatRow &&
         result.threadId !== chatRow.orchestrateThreadId
       ) {
-        await db
-          .update(chats)
-          .set({ orchestrateThreadId: result.threadId, updatedAt: new Date() })
-          .where(eq(chats.id, chatRow.id));
+        const threadId = result.threadId;
+        await updateChats(ws.path, (chats) => {
+          const chat = chats.find((c) => c.id === chatRow!.id);
+          if (chat) {
+            chat.orchestrateThreadId = threadId;
+            chat.updatedAt = new Date().toISOString();
+          }
+        });
       }
     } else if (ws && executor) {
       // ── LOCAL CodingAgent with real ToolExecutor (workspace open) ─────────
@@ -317,14 +321,22 @@ class AgentService {
 
     // ── Save assistant response (only when workspace exists) ──────────────
     const savedContent = finalContent.trim();
-    if ((savedContent || toolCalls.length > 0) && opts.workspaceId && chatRow) {
-      await db.insert(messages).values({
-        id: generateId(),
-        chatId: chatRow.id,
-        role: 'assistant',
-        content: savedContent,
-        toolCalls: toolCalls.length > 0 ? toolCalls : null,
-        toolResults: toolResults.length > 0 ? toolResults : null,
+    if ((savedContent || toolCalls.length > 0) && ws && chatRow) {
+      const now = new Date().toISOString();
+      await updateChats(ws.path, (chats) => {
+        const chat = chats.find((c) => c.id === chatRow!.id);
+        if (chat) {
+          chat.messages.push({
+            id: generateId(),
+            chatId: chat.id,
+            role: 'assistant',
+            content: savedContent,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            toolResults: toolResults.length > 0 ? toolResults : undefined,
+            createdAt: now,
+          });
+          chat.updatedAt = now;
+        }
       });
     }
   }

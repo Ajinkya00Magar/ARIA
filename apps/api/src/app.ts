@@ -20,6 +20,7 @@ import { terminalRouter } from './routes/terminal';
 import { gitRouter } from './routes/git';
 import { filesRouter } from './routes/files';
 import { taskRouter, settingsRouter, metricsRouter } from './routes/tasks';
+import { systemRouter } from './routes/system';
 import { RATE_LIMITS } from '@ibm-agent/shared';
 
 const logger = createLogger('app');
@@ -125,6 +126,7 @@ export function createApp(): Application {
   app.use('/api/tasks', taskRouter);
   app.use('/api/settings', settingsRouter);
   app.use('/api/metrics', metricsRouter);
+  app.use('/api/system', systemRouter);
 
   // ── 404 Handler ────────────────────────────────────────────────────────────
 

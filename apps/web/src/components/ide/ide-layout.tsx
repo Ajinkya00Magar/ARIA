@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { ActivityBar } from '@/components/ide/activity-bar';
 import { Sidebar } from '@/components/ide/sidebar';
@@ -24,19 +24,23 @@ export function IdeLayout() {
   const [activeBottomPanel, setActiveBottomPanel] = useState<'terminal' | 'output' | 'problems'>('terminal');
   const { permissionRequest } = useAgentStore();
   const { setWorkspace } = useWorkspaceStore();
-  const params = useParams<{ id?: string }>();
+  const searchParams = useSearchParams();
+  const id = searchParams.get('id');
 
-  // Load workspace if ID in URL
+  // Load workspace if ID in URL; otherwise send the user to the folder hub
   useEffect(() => {
-    if (params?.id) {
+    if (id) {
       apiClient
-        .get<{ data: Workspace }>(`/workspaces/${params.id}`)
+        .get<{ data: Workspace }>(`/workspaces/${id}`)
         .then((res) => setWorkspace(res.data.data))
         .catch(() => {
-          // workspace not found or no permission
+          // workspace not found (folder moved/removed) — pick again
+          window.location.href = '/workspace';
         });
+    } else {
+      window.location.href = '/workspace';
     }
-  }, [params?.id, setWorkspace]);
+  }, [id, setWorkspace]);
 
   // Handle keyboard shortcuts
   useEffect(() => {

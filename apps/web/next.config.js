@@ -1,8 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'export',
   reactStrictMode: true,
   transpilePackages: ['@ibm-agent/types', '@ibm-agent/shared'],
   images: {
+    unoptimized: true,
     remotePatterns: [
       { protocol: 'https', hostname: 'avatars.githubusercontent.com' },
       { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
@@ -11,7 +13,7 @@ const nextConfig = {
   // Point the frontend at your locally-running API in dev,
   // and at your deployed API URL in production (set via env var).
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001',
   },
   webpack(config, { isServer }) {
     if (!isServer) {

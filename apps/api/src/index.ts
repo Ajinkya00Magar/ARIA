@@ -4,7 +4,6 @@
 
 import 'dotenv/config';
 import { createApp } from './app';
-import { connectDatabase } from './db/connection';
 import { createLogger } from './lib/logger';
 import { env } from './lib/env';
 import { Server as SocketServer } from 'socket.io';
@@ -13,32 +12,11 @@ import { initTerminalSockets } from './lib/terminal-socket';
 const logger = createLogger('server');
 const app = createApp();
 
-let dbConnected = false;
-
-// In serverless environments, we must ensure the DB is connected before handling requests
-app.use(async (req, res, next) => {
-  if (!dbConnected) {
-    try {
-      await connectDatabase();
-      dbConnected = true;
-      logger.info('Database connected (serverless)');
-    } catch (err) {
-      logger.error({ err }, 'Failed to connect to database in serverless mode');
-    }
-  }
-  next();
-});
-
 async function main() {
-  // Connect to PostgreSQL / SQLite
-  await connectDatabase();
-  dbConnected = true;
-  logger.info('Database connected');
-
   const port = env.PORT || 3001;
 
-  const server = app.listen(port, () => {
-    logger.info({ port, env: env.NODE_ENV, version: process.env.npm_package_version ?? '1.0.0' }, 'IBM Coding Agent API running');
+  const server = app.listen(port as number, '127.0.0.1', () => {
+    logger.info({ port, env: env.NODE_ENV, version: process.env.npm_package_version ?? '1.0.0' }, 'IBM Coding Agent API running on 127.0.0.1');
   });
 
   const io = new SocketServer(server, {
@@ -66,8 +44,9 @@ async function main() {
   });
 
   process.on('uncaughtException', (err) => {
-    logger.error({ err }, 'Uncaught exception');
-    process.exit(1);
+    logger.error({ err }, 'Uncaught exception in API');
+    // We don't process.exit(1) here because the Electron main process
+    // should handle the error dialog and graceful exit.
   });
 }
 

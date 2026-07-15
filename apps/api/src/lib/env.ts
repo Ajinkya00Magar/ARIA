@@ -9,10 +9,18 @@ import { z } from 'zod';
 
 function loadEnvironmentFile(): void {
   const candidates = [
+    // Packaged desktop app: a user-editable .env in the Electron userData dir
+    // takes priority so credentials can be supplied without a rebuild.
+    ...(process.env.ELECTRON_USER_DATA
+      ? [path.resolve(process.env.ELECTRON_USER_DATA, '.env')]
+      : []),
     path.resolve(process.cwd(), '.env'),
     path.resolve(process.cwd(), '..', '.env'),
     path.resolve(process.cwd(), '..', '..', '.env'),
     path.resolve(__dirname, '..', '..', '..', '.env'),
+    // Packaged desktop app: .env bundled next to the compiled API
+    // (bundle/api/.env), resolved from dist/lib → ../../.env
+    path.resolve(__dirname, '..', '..', '.env'),
   ];
 
   for (const candidate of candidates) {
@@ -31,12 +39,11 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3001),
 
-  // Database
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-
-  // IBM watsonx
-  IBM_CLOUD_API_KEY: z.string().min(1, 'IBM_CLOUD_API_KEY is required'),
-  IBM_PROJECT_ID: z.string().min(1, 'IBM_PROJECT_ID is required'),
+  // IBM watsonx — optional so the app always boots. If absent, the agent
+  // degrades gracefully (chat requiring watsonx returns a helpful error) but
+  // the IDE, file access, git, and terminal all still work.
+  IBM_CLOUD_API_KEY: z.string().default(''),
+  IBM_PROJECT_ID: z.string().default(''),
   IBM_WATSONX_URL: z.string().url().default('https://us-south.ml.cloud.ibm.com'),
   IBM_REGION: z.string().default('us-south'),
   IBM_MODEL_ID: z.string().default('ibm/granite-34b-code-instruct'),
@@ -64,9 +71,9 @@ const envSchema = z.object({
   IBM_CLOUDANT_URL: z.string().url().optional(),
   IBM_CLOUDANT_API_KEY: z.string().optional(),
 
-  // JWT
-  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
+  // JWT — legacy, only used for cookie signing; harmless default for local app
+  JWT_SECRET: z.string().default('aria-local-desktop-cookie-signing-key'),
+  JWT_REFRESH_SECRET: z.string().default('aria-local-desktop-refresh-key-0000'),
 
   // OAuth (optional — app functions with local auth if not set)
   GITHUB_CLIENT_ID: z.string().optional(),
@@ -91,11 +98,14 @@ const envSchema = z.object({
 function parseEnv() {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
-    console.error('❌ Invalid environment variables:');
+    // Never kill the app over env issues — everything has a default or is
+    // optional. Log the problem and fall back to a fully-defaulted config so
+    // the packaged desktop app always boots.
+    console.error('⚠️  Environment validation warnings (using defaults):');
     for (const issue of result.error.issues) {
       console.error(`  ${issue.path.join('.')}: ${issue.message}`);
     }
-    process.exit(1);
+    return envSchema.parse({});
   }
   return result.data;
 }

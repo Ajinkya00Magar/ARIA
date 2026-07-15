@@ -20,5 +20,5 @@
     { "path": "../../packages/tools" }
   ],
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/db/seed.ts"]
+  "exclude": ["node_modules", "dist"]
 }

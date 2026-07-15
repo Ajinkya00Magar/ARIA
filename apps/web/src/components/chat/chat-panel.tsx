@@ -71,7 +71,7 @@ export function ChatPanel() {
         if (chats.length > 0) {
           const latestChat = chats[0];
           useAgentStore.getState().setChatId(latestChat.id);
-          const msgRes = await apiClient.get<{ data: any[] }>(`/chat/${latestChat.id}/messages`);
+          const msgRes = await apiClient.get<{ data: any[] }>(`/chat/${latestChat.id}/messages?workspaceId=${currentWorkspace.id}`);
           const loaded = msgRes.data.data.map((m) => ({
             id: m.id,
             role: m.role,
@@ -134,7 +134,7 @@ export function ChatPanel() {
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/agent/run`,
+        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3001'}/api/agent/run`,
         {
           method: 'POST',
           headers: {
