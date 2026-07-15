@@ -1,10 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Database Migration Script
+// Database Migration Script — PostgreSQL
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { migrate as runMigration } from 'drizzle-orm/better-sqlite3/migrator';
-import Database from 'better-sqlite3';
+import { env } from '../lib/env';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { migrate as runMigration } from 'drizzle-orm/postgres-js/migrator';
+import postgres from 'postgres';
 import path from 'path';
 
 const __dirname_resolved = __dirname;
@@ -13,16 +14,21 @@ async function migrate() {
   try {
     console.log('Running database migrations...');
 
-    const dbPath = path.resolve(process.cwd(), 'local.db');
-    const sqlite = new Database(dbPath);
-    const db = drizzle(sqlite);
+    const connectionString = env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error('DATABASE_URL is not set');
+    }
+
+    // This single connection is just for running migrations
+    const migrationClient = postgres(connectionString, { max: 1 });
+    const db = drizzle(migrationClient);
 
     const migrationsDir = path.join(__dirname_resolved, '../../migrations');
     
-    runMigration(db, { migrationsFolder: migrationsDir });
+    await runMigration(db, { migrationsFolder: migrationsDir });
 
     console.log('✅ All migrations complete');
-    sqlite.close();
+    await migrationClient.end();
   } catch (err) {
     console.error('Migration failed:', err);
     process.exit(1);

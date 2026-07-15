@@ -23,7 +23,7 @@ app.use(async (req, res, next) => {
       dbConnected = true;
       logger.info('Database connected (serverless)');
     } catch (err) {
-      logger.error('Failed to connect to database in serverless mode', err);
+      logger.error({ err }, 'Failed to connect to database in serverless mode');
     }
   }
   next();

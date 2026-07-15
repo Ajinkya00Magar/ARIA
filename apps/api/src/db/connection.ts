@@ -1,40 +1,41 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Database Connection — Drizzle + SQLite
+// Database Connection — Drizzle + PostgreSQL
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import Database from 'better-sqlite3';
-import path from 'path';
+import { drizzle, PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
 import { env } from '../lib/env';
 import * as schema from './schema';
 import { createLogger } from '../lib/logger';
 
 const logger = createLogger('database');
 
-let sqlite: Database.Database | null = null;
-let db: BetterSQLite3Database<typeof schema> | null = null;
+let queryClient: postgres.Sql | null = null;
+let db: PostgresJsDatabase<typeof schema> | null = null;
 
 export async function connectDatabase(): Promise<void> {
-  const isVercel = process.env.VERCEL === '1';
-  const dbPath = isVercel 
-    ? path.join('/tmp', 'local.db')
-    : path.resolve(process.cwd(), 'local.db');
-  sqlite = new Database(dbPath, {
-    verbose: (message) => logger.debug(message),
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is not set');
+  }
+  
+  queryClient = postgres(connectionString, {
+    max: 10,
+    onnotice: (notice) => logger.debug(notice.message),
   });
 
-  db = drizzle(sqlite, { schema });
-  logger.info(`Database connected at ${dbPath}`);
+  db = drizzle(queryClient, { schema });
+  logger.info('Connected to PostgreSQL database');
 }
 
-export function getDb(): BetterSQLite3Database<typeof schema> {
+export function getDb(): PostgresJsDatabase<typeof schema> {
   if (!db) throw new Error('Database not initialized. Call connectDatabase() first.');
   return db;
 }
 
 export async function closeDatabase(): Promise<void> {
-  if (sqlite) {
-    sqlite.close();
-    logger.info('Database closed');
+  if (queryClient) {
+    await queryClient.end();
+    logger.info('Database connection closed');
   }
 }

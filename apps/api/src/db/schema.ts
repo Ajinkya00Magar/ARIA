@@ -3,20 +3,23 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
-  sqliteTable,
+  pgTable,
   text,
   integer,
   real,
+  boolean,
+  timestamp,
+  json,
   uniqueIndex,
   index,
-} from 'drizzle-orm/sqlite-core';
+} from 'drizzle-orm/pg-core';
 
 // Helper for generating UUIDs since SQLite doesn't have a native uuid type
 import { v4 as uuidv4 } from 'uuid';
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
-export const users = sqliteTable(
+export const users = pgTable(
   'users',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -27,10 +30,10 @@ export const users = sqliteTable(
     role: text('role').notNull().default('developer'),
     provider: text('provider').notNull().default('local'),
     providerId: text('provider_id'),
-    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
-    lastLoginAt: integer('last_login_at', { mode: 'timestamp' }),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
-    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    isActive: boolean('is_active').notNull().default(true),
+    lastLoginAt: timestamp('last_login_at'),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
+    updatedAt: timestamp('updated_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     emailIdx: uniqueIndex('users_email_idx').on(t.email),
@@ -40,7 +43,7 @@ export const users = sqliteTable(
 
 // ── Refresh Tokens ────────────────────────────────────────────────────────────
 
-export const refreshTokens = sqliteTable(
+export const refreshTokens = pgTable(
   'refresh_tokens',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -48,9 +51,9 @@ export const refreshTokens = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     token: text('token').notNull(),
-    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-    revokedAt: integer('revoked_at', { mode: 'timestamp' }),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    expiresAt: timestamp('expires_at').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     tokenIdx: uniqueIndex('refresh_tokens_token_idx').on(t.token),
@@ -60,7 +63,7 @@ export const refreshTokens = sqliteTable(
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
-export const workspaces = sqliteTable(
+export const workspaces = pgTable(
   'workspaces',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -73,11 +76,11 @@ export const workspaces = sqliteTable(
     gitUrl: text('git_url'),
     gitBranch: text('git_branch'),
     status: text('status').notNull().default('active'),
-    isPinned: integer('is_pinned', { mode: 'boolean' }).notNull().default(false),
-    projectSummary: text('project_summary', { mode: 'json' }),
-    lastOpenedAt: integer('last_opened_at', { mode: 'timestamp' }),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
-    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    isPinned: boolean('is_pinned').notNull().default(false),
+    projectSummary: json('project_summary'),
+    lastOpenedAt: timestamp('last_opened_at'),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
+    updatedAt: timestamp('updated_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     ownerIdx: index('workspaces_owner_idx').on(t.ownerId),
@@ -87,7 +90,7 @@ export const workspaces = sqliteTable(
 
 // ── Workspace Members ─────────────────────────────────────────────────────────
 
-export const workspaceMembers = sqliteTable(
+export const workspaceMembers = pgTable(
   'workspace_members',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -98,7 +101,7 @@ export const workspaceMembers = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: text('role').notNull().default('developer'),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     uniqueIdx: uniqueIndex('workspace_members_unique').on(t.workspaceId, t.userId),
@@ -107,7 +110,7 @@ export const workspaceMembers = sqliteTable(
 
 // ── Chats ─────────────────────────────────────────────────────────────────────
 
-export const chats = sqliteTable(
+export const chats = pgTable(
   'chats',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -121,8 +124,8 @@ export const chats = sqliteTable(
     // watsonx Orchestrate server-side thread id (X-IBM-THREAD-ID) — keeps the
     // platform-side conversation continuous across turns for this chat.
     orchestrateThreadId: text('orchestrate_thread_id'),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
-    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
+    updatedAt: timestamp('updated_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     workspaceIdx: index('chats_workspace_idx').on(t.workspaceId),
@@ -132,7 +135,7 @@ export const chats = sqliteTable(
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-export const messages = sqliteTable(
+export const messages = pgTable(
   'messages',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -141,11 +144,11 @@ export const messages = sqliteTable(
       .references(() => chats.id, { onDelete: 'cascade' }),
     role: text('role').notNull(),
     content: text('content').notNull(),
-    toolCalls: text('tool_calls', { mode: 'json' }),
-    toolResults: text('tool_results', { mode: 'json' }),
+    toolCalls: json('tool_calls'),
+    toolResults: json('tool_results'),
     reasoning: text('reasoning'),
     tokens: integer('tokens'),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     chatIdx: index('messages_chat_idx').on(t.chatId),
@@ -155,7 +158,7 @@ export const messages = sqliteTable(
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
-export const tasks = sqliteTable(
+export const tasks = pgTable(
   'tasks',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -170,11 +173,11 @@ export const tasks = sqliteTable(
     description: text('description'),
     status: text('status').notNull().default('queued'),
     progress: integer('progress').default(0),
-    startedAt: integer('started_at', { mode: 'timestamp' }),
-    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
     error: text('error'),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
-    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
+    updatedAt: timestamp('updated_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     workspaceIdx: index('tasks_workspace_idx').on(t.workspaceId),
@@ -184,7 +187,7 @@ export const tasks = sqliteTable(
 
 // ── Memories ──────────────────────────────────────────────────────────────────
 
-export const memories = sqliteTable(
+export const memories = pgTable(
   'memories',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -196,9 +199,9 @@ export const memories = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     type: text('type').notNull(),
     content: text('content').notNull(),
-    metadata: text('metadata', { mode: 'json' }),
-    embedding: text('embedding', { mode: 'json' }),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    metadata: json('metadata'),
+    embedding: json('embedding'),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     workspaceIdx: index('memories_workspace_idx').on(t.workspaceId),
@@ -208,24 +211,24 @@ export const memories = sqliteTable(
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-export const userSettings = sqliteTable('user_settings', {
+export const userSettings = pgTable('user_settings', {
   userId: text('user_id')
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
   theme: text('theme').notNull().default('dark'),
   fontSize: integer('font_size').notNull().default(14),
   tabSize: integer('tab_size').notNull().default(2),
-  autoSave: integer('auto_save', { mode: 'boolean' }).notNull().default(true),
+  autoSave: boolean('auto_save').notNull().default(true),
   modelId: text('model_id'),
   temperature: real('temperature').notNull().default(0.2),
   maxTokens: integer('max_tokens').notNull().default(4096),
   githubToken: text('github_token'),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').notNull().$defaultFn(() => new Date()),
 });
 
 // ── Audit Logs ────────────────────────────────────────────────────────────────
 
-export const auditLogs = sqliteTable(
+export const auditLogs = pgTable(
   'audit_logs',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -234,10 +237,10 @@ export const auditLogs = sqliteTable(
     action: text('action').notNull(),
     resource: text('resource'),
     resourceId: text('resource_id'),
-    details: text('details', { mode: 'json' }),
+    details: json('details'),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     userIdx: index('audit_logs_user_idx').on(t.userId),
@@ -248,7 +251,7 @@ export const auditLogs = sqliteTable(
 
 // ── Terminal Sessions ─────────────────────────────────────────────────────────
 
-export const terminalSessions = sqliteTable(
+export const terminalSessions = pgTable(
   'terminal_sessions',
   {
     id: text('id').primaryKey().$defaultFn(() => uuidv4()),
@@ -262,8 +265,8 @@ export const terminalSessions = sqliteTable(
     status: text('status').notNull().default('idle'),
     pid: integer('pid'),
     cwd: text('cwd').notNull(),
-    output: text('output', { mode: 'json' }).default('[]'),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    output: json('output').default('[]'),
+    createdAt: timestamp('created_at').notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     workspaceIdx: index('terminal_sessions_workspace_idx').on(t.workspaceId),
