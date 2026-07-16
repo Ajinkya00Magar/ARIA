@@ -163,7 +163,8 @@ export type AgentEventType =
   | 'agent_error'
   | 'permission_request'
   | 'status_update'
-  | 'chat_info';
+  | 'chat_info'
+  | 'tool_call_request';
 
 export interface AgentEvent {
   type: AgentEventType;
@@ -183,7 +184,8 @@ export type AgentEventData =
   | AgentErrorEvent
   | PermissionRequestEvent
   | StatusUpdateEvent
-  | ChatInfoEvent;
+  | ChatInfoEvent
+  | ToolCallRequestEvent;
 
 export interface ThinkingEvent {
   text: string;
@@ -242,6 +244,10 @@ export interface StatusUpdateEvent {
 
 export interface ChatInfoEvent {
   chatId: string;
+}
+
+export interface ToolCallRequestEvent {
+  toolCalls: ToolCall[];
 }
 
 // ── Task ──────────────────────────────────────────────────────────────────────

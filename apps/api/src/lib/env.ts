@@ -97,6 +97,10 @@ const envSchema = z.object({
   // Supabase (optional)
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
+  
+  // Cloud Proxy
+  IS_CLOUD_PROXY: z.string().optional(),
+  CLOUD_PROXY_URL: z.string().url().optional(),
 });
 
 function parseEnv() {

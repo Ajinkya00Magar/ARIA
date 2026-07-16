@@ -62,6 +62,19 @@ function startApi() {
   }
   try {
     logToFile('Starting Express API in main process...');
+    
+    // Load bundled .env file
+    const envPath = path.join(__dirname, 'bundle', '.env');
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      envContent.split('\n').forEach(line => {
+        const match = line.match(/^([^=]+)=(.*)$/);
+        if (match && !line.startsWith('#')) {
+          process.env[match[1].trim()] = match[2].trim();
+        }
+      });
+      logToFile('Bundled .env loaded successfully');
+    }
     process.env.NODE_ENV = 'production';
     process.env.PORT = '3001';
     process.env.ELECTRON_USER_DATA = app.getPath('userData');

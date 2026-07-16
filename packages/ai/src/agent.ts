@@ -44,8 +44,9 @@ export interface AgentRunOptions {
   maxTokens?: number;
   maxIterations?: number;
   onEvent: (event: AgentEvent) => void;
-  executeToolFn: ToolExecutorFn;
-  requestPermissionFn: PermissionRequestFn;
+  executeToolFn?: ToolExecutorFn;
+  requestPermissionFn?: PermissionRequestFn;
+  yieldForTools?: boolean;
 }
 
 const DESTRUCTIVE_TOOLS: ToolName[] = ['delete_file', 'git_push'];
@@ -87,6 +88,7 @@ export class CodingAgent {
       onEvent,
       executeToolFn,
       requestPermissionFn,
+      yieldForTools,
     } = opts;
 
     emit(onEvent, 'status_update', { status: 'thinking' as AgentStatus, message: 'Agent started' });
@@ -100,6 +102,8 @@ export class CodingAgent {
         role: m.role === 'tool' ? 'tool' : (m.role as WatsonxMessage['role']),
         content: m.content,
         toolCalls: m.toolCalls as never,
+        toolCallId: (m as any).toolCallId,
+        name: (m as any).name,
       })),
       { role: 'user', content: userMessage },
     ];
@@ -222,7 +226,17 @@ export class CodingAgent {
         })),
       });
 
-      // Execute all tool calls and collect results
+      if (yieldForTools) {
+        emit(onEvent, 'tool_call_request', { toolCalls: parsedToolCalls });
+        // The stream ends here. The client will execute tools and call back.
+        return contentBuffer;
+      }
+
+      // Execute all tool calls and collect results (Local fallback)
+      if (!executeToolFn || !requestPermissionFn) {
+         throw new AgentError('executeToolFn and requestPermissionFn are required when yieldForTools is false');
+      }
+      
       const toolResults: ToolResult[] = [];
 
       for (const toolCall of parsedToolCalls) {

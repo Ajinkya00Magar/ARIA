@@ -38,4 +38,10 @@ fs.copyFileSync(apiPkg, path.join(bundleDir, 'api/package.json'));
 // Copy WEB out
 copyFolderSync(path.join(__dirname, '../web/out'), path.join(bundleDir, 'web/out'));
 
+// Copy .env so the bundled app has access to the keys
+const rootEnv = path.join(__dirname, '../../.env');
+if (fs.existsSync(rootEnv)) {
+  fs.copyFileSync(rootEnv, path.join(bundleDir, '.env'));
+}
+
 console.log('Assets copied to bundle directory successfully.');

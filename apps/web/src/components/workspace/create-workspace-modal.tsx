@@ -55,8 +55,9 @@ export function CreateWorkspaceModal({ onClose, onCreate }: Props) {
         const base = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path;
         if (!watch('name')) setValue('name', base);
       }
-    } catch {
-      toast.error('Could not open the folder picker.');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Could not open the folder picker: ${err.message || String(err)}`);
     } finally {
       setIsPicking(false);
     }

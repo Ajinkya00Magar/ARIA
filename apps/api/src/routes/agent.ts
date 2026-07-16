@@ -14,10 +14,12 @@ agentRouter.use(authenticate);
 
 // POST /api/agent/run — SSE streaming agent run
 agentRouter.post('/run', validate(SendMessageSchema), async (req: Request, res: Response) => {
-  const { chatId, content, workspaceId } = req.body as {
+  const { chatId, content, workspaceId, chatHistory, isContinuation } = req.body as {
     chatId: string;
     content: string;
     workspaceId: string;
+    chatHistory?: any[];
+    isContinuation?: boolean;
   };
 
   const userId = req.user?.sub;
@@ -26,29 +28,33 @@ agentRouter.post('/run', validate(SendMessageSchema), async (req: Request, res: 
     return;
   }
 
-  // Check usage limit
-  const { supabase } = require('../lib/supabase');
-  const { data: profile, error: dbError } = await supabase
-    .from('profiles')
-    .select('prompt_count')
-    .eq('id', userId)
-    .single();
+  // If we are proxying to Cloud, skip the local prompt check; Cloud will do it.
+  // Also, if this is a continuation of a run (tool call loop), do not charge an extra prompt.
+  if (!env.CLOUD_PROXY_URL && !isContinuation) {
+    // Check usage limit
+    const { supabase } = require('../lib/supabase');
+    const { data: profile, error: dbError } = await supabase
+      .from('profiles')
+      .select('prompt_count')
+      .eq('id', userId)
+      .single();
 
-  if (dbError || !profile) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch user profile' } });
-    return;
+    if (dbError || !profile) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch user profile' } });
+      return;
+    }
+
+    if (profile.prompt_count >= 10) {
+      res.status(429).json({ success: false, error: { code: 'RATE_LIMIT', message: 'Free usage limit reached. Maximum 10 prompts allowed.' } });
+      return;
+    }
+
+    // Increment usage limit
+    await supabase
+      .from('profiles')
+      .update({ prompt_count: profile.prompt_count + 1 })
+      .eq('id', userId);
   }
-
-  if (profile.prompt_count >= 10) {
-    res.status(429).json({ success: false, error: { code: 'RATE_LIMIT', message: 'Free usage limit reached. Maximum 10 prompts allowed.' } });
-    return;
-  }
-
-  // Increment usage limit
-  await supabase
-    .from('profiles')
-    .update({ prompt_count: profile.prompt_count + 1 })
-    .eq('id', userId);
   // Set up SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -77,6 +83,8 @@ agentRouter.post('/run', validate(SendMessageSchema), async (req: Request, res: 
       chatId,
       workspaceId,
       userId,
+      token: req.headers.authorization,
+      chatHistory,
       userMessage: content,
       onEvent: sendEvent,
       pendingPermissions,

@@ -13,6 +13,7 @@ import { getChat, updateChats, type ChatRecord } from '../lib/store';
 import { env } from '../lib/env';
 import { permissionService } from './permission.service';
 import { OrchestrateClient } from './orchestrate.client';
+import { CloudProxyClient } from './cloud-proxy.client';
 
 const logger = createConsoleLogger('info');
 
@@ -20,6 +21,8 @@ interface AgentRunOptions {
   chatId: string;
   workspaceId: string;
   userId: string;
+  token?: string;
+  chatHistory?: any[];
   userMessage: string;
   onEvent: (event: AgentEvent) => void;
   pendingPermissions: Map<string, (approved: boolean) => void>;
@@ -29,6 +32,7 @@ class AgentService {
   private readonly watsonx: WatsonxClient;
   private readonly agent: CodingAgent;
   private readonly orchestrate: OrchestrateClient | null;
+  private readonly cloudProxy: CloudProxyClient;
 
   constructor() {
     this.watsonx = new WatsonxClient({
@@ -40,6 +44,7 @@ class AgentService {
       parameters: { temperature: 0.2, maxNewTokens: 4096 },
     });
     this.agent = new CodingAgent(this.watsonx);
+    this.cloudProxy = new CloudProxyClient();
 
     // IBM Orchestrate is opt-in: the platform agent carries its own
     // instructions and Flows (which can lock the chat with "A new flow has
@@ -65,7 +70,7 @@ class AgentService {
   async run(opts: AgentRunOptions): Promise<void> {
     // ── Load workspace (optional — allow chat without a workspace) ─────────
     let ws: { id: string; path: string; projectSummary: unknown } | undefined;
-    if (opts.workspaceId) {
+    if (opts.workspaceId && env.IS_CLOUD_PROXY !== 'true') {
       const record = await workspaceService.getRecord(opts.workspaceId);
       if (record) {
         ws = { id: record.id, path: record.path, projectSummary: record.projectSummary };
@@ -73,10 +78,8 @@ class AgentService {
     }
 
     // ── Load or create chat, persist user message into <folder>/.aria ───────
-    // Chat history is saved automatically as soon as the first prompt is
-    // given inside an open folder.
     let chatRow: { id: string; orchestrateThreadId?: string | null } | undefined;
-    if (ws) {
+    if (ws && env.IS_CLOUD_PROXY !== 'true') {
       const wsPath = ws.path;
       const existing = opts.chatId ? await getChat(wsPath, opts.chatId) : undefined;
       const chatId = existing?.id ?? (opts.chatId || generateId());
@@ -109,12 +112,9 @@ class AgentService {
       const saved = await getChat(wsPath, chatId);
       chatRow = { id: chatId, orchestrateThreadId: saved?.orchestrateThreadId ?? null };
     } else {
-      // No workspace — use an ephemeral chat ID (not persisted)
       chatRow = { id: opts.chatId || generateId() };
     }
 
-    // Tell the client which chat this run belongs to so it can reuse the id
-    // on the next turn (otherwise the conversation context is lost).
     opts.onEvent({
       type: 'chat_info',
       data: { chatId: chatRow.id },
@@ -122,10 +122,27 @@ class AgentService {
     });
 
     // ── Load chat history ──────────────────────────────────────────────────
-    const savedChat: ChatRecord | undefined = ws
-      ? await getChat(ws.path, chatRow.id)
-      : undefined;
-    const historyRows = savedChat?.messages ?? [];
+    let historyRows: any[] = [];
+    if (env.IS_CLOUD_PROXY === 'true') {
+      // In Cloud Proxy, frontend/local sends the history in opts (needs to be added to opts if it's not there!)
+      // Wait, let's just add `chatHistory` to opts!
+      historyRows = opts.chatHistory || [];
+      // Also append the new user message
+      historyRows.push({
+        id: generateId(),
+        chatId: chatRow.id,
+        role: 'user',
+        content: opts.userMessage,
+        createdAt: new Date().toISOString(),
+      });
+    } else if (ws) {
+      const savedChat: ChatRecord | undefined = await getChat(ws.path, chatRow.id);
+      historyRows = savedChat?.messages ?? [];
+    } else {
+      historyRows = [
+         { id: generateId(), chatId: chatRow.id, role: 'user', content: opts.userMessage, createdAt: new Date().toISOString() }
+      ];
+    }
 
     const chatHistory = historyRows.map((m) => ({
       id: m.id,
@@ -134,6 +151,8 @@ class AgentService {
       content: m.content,
       toolCalls: m.toolCalls as never,
       toolResults: m.toolResults as never,
+      toolCallId: m.toolCallId,
+      name: m.name,
       createdAt: new Date(m.createdAt),
     }));
 
@@ -242,6 +261,116 @@ class AgentService {
           }
         });
       }
+    } else if (env.CLOUD_PROXY_URL) {
+      // ── CLOUD PROXY CodingAgent (Yields tools to client) ─────────
+      logger.info(`☁️ Routing to Cloud Proxy at ${env.CLOUD_PROXY_URL}`);
+      
+      let loopCount = 0;
+      let currentHistory = chatHistory.slice(0, -1);
+      const userMessage = opts.userMessage;
+
+      while (loopCount < 20) {
+        loopCount++;
+        const result = await this.cloudProxy.run({
+          workspaceId: opts.workspaceId,
+          token: opts.token,
+          proxyUrl: env.CLOUD_PROXY_URL,
+          isContinuation: loopCount > 1,
+          chatHistory: currentHistory,
+          userMessage: loopCount === 1 ? userMessage : "",
+          projectSummary: ws?.projectSummary ?? null, 
+          onEvent: opts.onEvent,
+        });
+
+        // The chunk contains the text returned by the model so far
+        finalContent += result.content;
+
+        if (result.toolCalls && result.toolCalls.length > 0) {
+          // Add assistant message with tool calls to history
+          currentHistory.push({
+            id: generateId(),
+            chatId: chatRow!.id,
+            role: 'assistant',
+            content: result.content,
+            toolCalls: result.toolCalls as never,
+            createdAt: new Date(),
+          });
+
+          for (const tc of result.toolCalls) {
+            toolCalls.push(tc);
+            let output = '';
+            
+            opts.onEvent({
+              type: 'tool_start',
+              data: { toolCallId: tc.id, toolName: tc.name, arguments: tc.arguments },
+              timestamp: new Date()
+            });
+
+            if (executor) {
+              try {
+                output = await executor.execute(tc.name as ToolName, typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments);
+              } catch (e) {
+                output = String(e);
+              }
+            } else {
+              output = `Tool "${tc.name}" requires an open workspace. Please open a workspace first.`;
+            }
+
+            opts.onEvent({
+              type: 'tool_end',
+              data: { toolCallId: tc.id, toolName: tc.name, output },
+              timestamp: new Date()
+            });
+            toolResults.push({ id: tc.id, name: tc.name, output });
+            
+            // Add tool response to history
+            currentHistory.push({
+              id: generateId(),
+              chatId: chatRow!.id,
+              role: 'tool',
+              content: output,
+              toolCallId: tc.id,
+              name: tc.name,
+              createdAt: new Date(),
+            } as any);
+          }
+        } else {
+          // No more tool calls, we are done
+          break;
+        }
+      }
+    } else if (env.IS_CLOUD_PROXY === 'true') {
+      // ── CLOUD PROXY CodingAgent (Yields tools to client) ─────────
+      logger.info(`☁️ Running Cloud Proxy CodingAgent (yieldForTools: true)`);
+      
+      await this.agent.run({
+        workspaceId: opts.workspaceId,
+        userId: opts.userId,
+        chatHistory: chatHistory.slice(0, -1),
+        userMessage: opts.userMessage,
+        // In Cloud Proxy, projectSummary should be passed in via opts. We don't have it locally.
+        // For now, allow the agent to run without it or add it to opts later.
+        projectSummary: null, 
+        memories: [],
+        yieldForTools: true,
+        onEvent: (event) => {
+          opts.onEvent(event);
+          if (event.type === 'content_done') {
+            finalContent = (event.data as { content: string }).content;
+          }
+          if (event.type === 'content_delta') {
+            finalContent += (event.data as { delta: string }).delta;
+          }
+          if (event.type === 'tool_start') {
+            const data = event.data as any;
+            toolCalls.push({ id: data.toolCallId, name: data.toolName, arguments: data.arguments });
+          }
+          if (event.type === 'tool_end') {
+            const data = event.data as any;
+            toolResults.push({ id: data.toolCallId, name: data.toolName, output: data.output });
+          }
+        },
+      });
     } else if (ws && executor) {
       // ── LOCAL CodingAgent with real ToolExecutor (workspace open) ─────────
       const projectSummary = ws.projectSummary as ProjectSummary | null;
@@ -321,7 +450,7 @@ class AgentService {
 
     // ── Save assistant response (only when workspace exists) ──────────────
     const savedContent = finalContent.trim();
-    if ((savedContent || toolCalls.length > 0) && ws && chatRow) {
+    if ((savedContent || toolCalls.length > 0) && ws && chatRow && env.IS_CLOUD_PROXY !== 'true') {
       const now = new Date().toISOString();
       await updateChats(ws.path, (chats) => {
         const chat = chats.find((c) => c.id === chatRow!.id);

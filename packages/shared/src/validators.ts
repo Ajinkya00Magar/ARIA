@@ -27,6 +27,8 @@ export const SendMessageSchema = z.object({
   chatId: z.string().optional().default(''),
   content: z.string().min(1).max(32000),
   workspaceId: z.string().optional().default(''),
+  chatHistory: z.array(z.any()).optional(),
+  isContinuation: z.boolean().optional(),
 });
 
 export const RegisterSchema = z.object({
