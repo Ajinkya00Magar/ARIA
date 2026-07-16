@@ -143,3 +143,7 @@ export function createApp(): Application {
 
   return app;
 }
+
+// Dummy default export to appease Vercel's Serverless Function scanner,
+// which attempts to parse every file in the `dist` folder.
+export default function dummy() {}

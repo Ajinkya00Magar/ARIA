@@ -59,4 +59,4 @@ if (process.env.VERCEL !== '1') {
 }
 
 // Export the app for Vercel Serverless Functions
-module.exports = app;
+export default app;
