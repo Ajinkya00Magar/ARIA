@@ -19,9 +19,10 @@ export class ToolExecutor {
 
   constructor(
     workspaceRoot: string,
+    token: string | undefined,
     requirePermission: (cmd: string) => Promise<boolean>,
   ) {
-    this.fs = new FileSystemTool(workspaceRoot);
+    this.fs = new FileSystemTool(workspaceRoot, token);
     this.terminal = new TerminalTool(workspaceRoot, requirePermission);
     this.git = new GitTool(workspaceRoot);
     this.search = new SearchTool(workspaceRoot);

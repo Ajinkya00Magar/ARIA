@@ -8,10 +8,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import dynamic from 'next/dynamic';
 
-const IntegratedTerminal = dynamic(
-  () => import('@/components/terminal/integrated-terminal').then((m) => m.IntegratedTerminal),
-  { ssr: false, loading: () => <div className="p-4 text-xs text-muted-foreground">Loading terminal...</div> }
-);
+import { TerminalPanel } from '@/components/ide/panels/terminal-panel';
 
 interface BottomPanelProps {
   activePanel: 'terminal' | 'output' | 'problems';
@@ -72,7 +69,7 @@ export function BottomPanel({ activePanel, onChangePanel, onClose }: BottomPanel
 
       {/* Panel Content */}
       <div className="flex-1 overflow-hidden">
-        {activePanel === 'terminal' && <IntegratedTerminal workspacePath={currentWorkspace?.path || process.cwd()} />}
+        {activePanel === 'terminal' && <TerminalPanel />}
         {activePanel === 'problems' && <ProblemsPanel />}
         {activePanel === 'output' && <OutputPanel />}
       </div>

@@ -7,10 +7,15 @@ import type { GitStatus, GitCommit, GitBranch, GitFileChange } from '@ibm-agent/
 import { ToolExecutionError } from '@ibm-agent/shared';
 
 export class GitTool {
-  private readonly git: SimpleGit;
+  private _git?: SimpleGit;
 
-  constructor(workspaceRoot: string) {
-    this.git = simpleGit({ baseDir: workspaceRoot, maxConcurrentProcesses: 1 });
+  constructor(private readonly workspaceRoot: string) {}
+
+  private get git(): SimpleGit {
+    if (!this._git) {
+      this._git = simpleGit({ baseDir: this.workspaceRoot, maxConcurrentProcesses: 1 });
+    }
+    return this._git;
   }
 
   // ── Status ─────────────────────────────────────────────────────────────────────

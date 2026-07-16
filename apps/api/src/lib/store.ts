@@ -65,6 +65,7 @@ export async function insertWorkspaceRecord(record: WorkspaceRecord): Promise<vo
 }
 
 export async function patchWorkspaceRecord(id: string, updates: Partial<WorkspaceRecord>): Promise<void> {
+  if (!id || id === 'undefined') return;
   const { error } = await supabase.from('workspaces').update({
     name: updates.name,
     description: updates.description,
@@ -81,6 +82,7 @@ export async function patchWorkspaceRecord(id: string, updates: Partial<Workspac
 }
 
 export async function deleteWorkspaceRecord(id: string): Promise<void> {
+  if (!id || id === 'undefined') return;
   const { error } = await supabase.from('workspaces').delete().eq('id', id);
   if (error) console.error('Error deleting workspace:', error);
 }
@@ -175,6 +177,8 @@ export interface ChatRecord {
 }
 
 export async function listChats(workspaceId: string): Promise<ChatRecord[]> {
+  if (!workspaceId || workspaceId === 'undefined') return [];
+
   const { data, error } = await supabase
     .from('chats')
     .select(`
@@ -193,6 +197,8 @@ export async function listChats(workspaceId: string): Promise<ChatRecord[]> {
 }
 
 export async function getChat(workspaceId: string, chatId: string): Promise<ChatRecord | undefined> {
+  if (!chatId || chatId === 'undefined') return undefined;
+  
   const { data, error } = await supabase
     .from('chats')
     .select(`*, chat_messages (*)`)

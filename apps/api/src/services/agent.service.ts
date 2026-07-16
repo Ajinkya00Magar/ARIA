@@ -162,7 +162,7 @@ class AgentService {
     const toolResults: any[] = [];
 
     const executor = ws
-      ? new ToolExecutor(ws.path, async (cmd) => {
+      ? new ToolExecutor(ws.path, opts.token, async (cmd) => {
           return permissionService.request(
             opts.pendingPermissions,
             cmd,

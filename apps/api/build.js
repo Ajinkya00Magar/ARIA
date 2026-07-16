@@ -38,6 +38,18 @@ async function build() {
   // 2. Build with esbuild
   const outPath = path.join(__dirname, 'dist', 'index.js');
   
+  const isVercel = process.env.VERCEL === '1';
+
+  const externalModules = [
+    'node-pty',
+    'electron'
+  ];
+  
+  if (isVercel) {
+    // Vercel needs to find require('express') in the final bundle to recognize it as a serverless function
+    externalModules.push('express');
+  }
+
   await esbuild.build({
     entryPoints: ['src/index.ts'],
     bundle: true,
@@ -45,52 +57,54 @@ async function build() {
     target: 'node20',
     outfile: outPath,
     define: defineEnv,
-    external: [
-      // Externalize node-pty and other native modules if any so they don't break
-      'node-pty',
-      'electron'
-    ],
+    external: externalModules,
     minify: true, // initial minify
   });
 
   console.log('esbuild bundling completed.');
 
-  // 3. Obfuscate the bundled output
-  console.log('Obfuscating the API bundle to hide keys and endpoints...');
-  const bundledCode = fs.readFileSync(outPath, 'utf8');
-  
-  const obfuscationResult = JavaScriptObfuscator.obfuscate(bundledCode, {
-    compact: true,
-    controlFlowFlattening: true,
-    controlFlowFlatteningThreshold: 0.5,
-    deadCodeInjection: false,
-    debugProtection: false,
-    disableConsoleOutput: false,
-    identifierNamesGenerator: 'hexadecimal',
-    log: false,
-    numbersToExpressions: true,
-    renameGlobals: false,
-    selfDefending: false,
-    simplify: true,
-    splitStrings: true,
-    splitStringsChunkLength: 10,
-    stringArray: true,
-    stringArrayCallsTransform: true,
-    stringArrayCallsTransformThreshold: 0.5,
-    stringArrayEncoding: ['base64'],
-    stringArrayIndexShift: true,
-    stringArrayRotate: true,
-    stringArrayShuffle: true,
-    stringArrayWrappersCount: 1,
-    stringArrayWrappersChainedCalls: true,
-    stringArrayWrappersParametersMaxCount: 2,
-    stringArrayWrappersType: 'variable',
-    stringArrayThreshold: 0.75,
-    unicodeEscapeSequence: false
-  });
+  // 3. Obfuscate the bundled output (Skip on Vercel)
+  if (isVercel) {
+    console.log('Skipping obfuscation for Vercel deployment...');
+  } else {
+    console.log('Obfuscating the API bundle to hide keys and endpoints...');
+    const bundledCode = fs.readFileSync(outPath, 'utf8');
+    
+    const obfuscationResult = JavaScriptObfuscator.obfuscate(bundledCode, {
+      compact: true,
+      controlFlowFlattening: true,
+      controlFlowFlatteningThreshold: 0.5,
+      deadCodeInjection: false,
+      debugProtection: false,
+      disableConsoleOutput: false,
+      identifierNamesGenerator: 'hexadecimal',
+      log: false,
+      numbersToExpressions: true,
+      renameGlobals: false,
+      selfDefending: false,
+      simplify: true,
+      splitStrings: true,
+      splitStringsChunkLength: 10,
+      stringArray: true,
+      stringArrayCallsTransform: true,
+      stringArrayCallsTransformThreshold: 0.5,
+      stringArrayEncoding: ['base64'],
+      stringArrayIndexShift: true,
+      stringArrayRotate: true,
+      stringArrayShuffle: true,
+      stringArrayWrappersCount: 1,
+      stringArrayWrappersChainedCalls: true,
+      stringArrayWrappersParametersMaxCount: 2,
+      stringArrayWrappersType: 'variable',
+      stringArrayThreshold: 0.75,
+      unicodeEscapeSequence: false
+    });
 
-  fs.writeFileSync(outPath, obfuscationResult.getObfuscatedCode());
-  console.log('API build and obfuscation complete!');
+    fs.writeFileSync(outPath, obfuscationResult.getObfuscatedCode());
+    console.log('API obfuscation complete!');
+  }
+  
+  console.log('API build complete!');
 }
 
 build().catch(err => {

@@ -7,18 +7,23 @@ import { NotFoundError, WorkspaceError, ValidationError } from '@ibm-agent/share
 import { getFileExtension, getLanguageFromExtension, formatBytes } from '@ibm-agent/shared';
 import type { WorkspaceFile } from '@ibm-agent/types';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'dummy';
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false },
-});
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://dummy.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'dummy';
 
 export class FileSystemTool {
+  private readonly supabase: any;
+
   // workspaceRoot is now the Workspace ID (used as a prefix in Supabase Storage)
-  constructor(private readonly workspaceRoot: string) {
+  constructor(private readonly workspaceRoot: string, token?: string) {
     if (this.workspaceRoot.startsWith('/')) {
       this.workspaceRoot = this.workspaceRoot.substring(1);
     }
+    
+    // Create an authenticated client if a JWT token is provided
+    this.supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false },
+      global: token ? { headers: { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } } : {},
+    });
   }
 
   private getPath(relativePath: string): string {
@@ -30,7 +35,7 @@ export class FileSystemTool {
   async readFile(relativePath: string, encoding: 'utf-8' | 'base64' = 'utf-8'): Promise<string> {
     const fullPath = this.getPath(relativePath);
     
-    const { data, error } = await supabase.storage.from('workspaces').download(fullPath);
+    const { data, error } = await this.supabase.storage.from('workspaces').download(fullPath);
     if (error) {
       throw new NotFoundError(`File: ${relativePath} (${error.message})`);
     }
@@ -51,7 +56,7 @@ export class FileSystemTool {
     
     // Check if exists
     let created = false;
-    const { data: existingData } = await supabase.storage.from('workspaces').list(this.getPath(relativePath.split('/').slice(0, -1).join('/')), {
+    const { data: existingData } = await this.supabase.storage.from('workspaces').list(this.getPath(relativePath.split('/').slice(0, -1).join('/')), {
       search: relativePath.split('/').pop()!
     });
     
@@ -60,7 +65,7 @@ export class FileSystemTool {
     }
 
     const buffer = Buffer.from(content, 'utf-8');
-    const { data, error } = await supabase.storage.from('workspaces').upload(fullPath, buffer, {
+    const { data, error } = await this.supabase.storage.from('workspaces').upload(fullPath, buffer, {
       upsert: true,
       contentType: 'text/plain;charset=UTF-8'
     });
@@ -77,17 +82,17 @@ export class FileSystemTool {
     
     // In Supabase storage, to delete a "folder" recursively, we must list and delete all files with that prefix
     if (recursive) {
-      const { data, error } = await supabase.storage.from('workspaces').list(fullPath);
+      const { data, error } = await this.supabase.storage.from('workspaces').list(fullPath);
       if (error) throw new WorkspaceError(error.message);
       
       if (data && data.length > 0) {
         const paths = data.map(f => `${fullPath}/${f.name}`);
-        await supabase.storage.from('workspaces').remove(paths);
+        await this.supabase.storage.from('workspaces').remove(paths);
         return `Directory deleted: ${relativePath}`;
       }
     }
 
-    const { error } = await supabase.storage.from('workspaces').remove([fullPath]);
+    const { error } = await this.supabase.storage.from('workspaces').remove([fullPath]);
     if (error) throw new NotFoundError(`File: ${relativePath}`);
 
     return `File deleted: ${relativePath}`;
@@ -97,7 +102,7 @@ export class FileSystemTool {
     const oldFull = this.getPath(oldPath);
     const newFull = this.getPath(newPath);
 
-    const { error } = await supabase.storage.from('workspaces').move(oldFull, newFull);
+    const { error } = await this.supabase.storage.from('workspaces').move(oldFull, newFull);
     if (error) throw new WorkspaceError(error.message);
 
     return `Renamed: ${oldPath} → ${newPath}`;
@@ -115,7 +120,7 @@ export class FileSystemTool {
   ): Promise<WorkspaceFile[]> {
     const fullPath = this.getPath(relativePath);
     
-    const { data, error } = await supabase.storage.from('workspaces').list(fullPath, {
+    const { data, error } = await this.supabase.storage.from('workspaces').list(fullPath, {
       limit: 1000,
     });
     
@@ -157,7 +162,7 @@ export class FileSystemTool {
 
   async exists(relativePath: string): Promise<boolean> {
     try {
-      const { data, error } = await supabase.storage.from('workspaces').list(this.getPath(relativePath.split('/').slice(0, -1).join('/')), {
+      const { data, error } = await this.supabase.storage.from('workspaces').list(this.getPath(relativePath.split('/').slice(0, -1).join('/')), {
         search: relativePath.split('/').pop()!
       });
       return !error && data && data.length > 0;
