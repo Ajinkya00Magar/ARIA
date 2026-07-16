@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { ActivityBar } from '@/components/ide/activity-bar';
 import { Sidebar } from '@/components/ide/sidebar';
@@ -17,6 +17,7 @@ import { apiClient } from '@/lib/api-client';
 import type { Workspace } from '@ibm-agent/types';
 
 export function IdeLayout() {
+  const router = useRouter();
   const [activeSidebarPanel, setActiveSidebarPanel] = useState<string>('explorer');
   const [showChat, setShowChat] = useState(true);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -35,12 +36,12 @@ export function IdeLayout() {
         .then((res) => setWorkspace(res.data.data))
         .catch(() => {
           // workspace not found (folder moved/removed) — pick again
-          window.location.href = '/workspace';
+          router.push('/workspace');
         });
     } else {
-      window.location.href = '/workspace';
+      router.push('/workspace');
     }
-  }, [id, setWorkspace]);
+  }, [id, setWorkspace, router]);
 
   // Handle keyboard shortcuts
   useEffect(() => {

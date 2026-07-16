@@ -20,6 +20,7 @@ export default function WorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const { user, logout } = useAuthStore();
 
@@ -35,6 +36,7 @@ export default function WorkspacePage() {
   }, []);
 
   useEffect(() => {
+    setMounted(true);
     void fetchWorkspaces();
   }, [fetchWorkspaces]);
 
@@ -95,7 +97,7 @@ export default function WorkspacePage() {
             <Terminal className="w-3.5 h-3.5" />
             <span className="hidden sm:block">IDE</span>
           </button>
-          {user && (
+          {mounted && user && (
             <div className="flex items-center gap-2 pl-2 border-l border-[#393939]">
               <div className="flex items-center gap-1.5">
                 <div className="w-6 h-6 rounded-full bg-[#0f62fe]/30 border border-[#0f62fe]/40 flex items-center justify-center">

@@ -31,9 +31,11 @@ export function TopNav({ showChat, showSidebar, onToggleChat, onToggleSidebar }:
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
 
   // Close menus on outside click
   useEffect(() => {
+    setMounted(true);
     function handleClick(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpenMenu(null);
@@ -229,7 +231,7 @@ export function TopNav({ showChat, showSidebar, onToggleChat, onToggleSidebar }:
               <User className="h-3 w-3 text-[#4589ff]" />
             </div>
             <span className="text-xs hidden sm:block max-w-[80px] truncate">
-              {user?.name ?? 'Account'}
+              {mounted ? (user?.name ?? 'Account') : 'Account'}
             </span>
             <ChevronDown className="h-3 w-3 hidden sm:block" />
           </button>

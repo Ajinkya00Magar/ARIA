@@ -39,6 +39,7 @@ function createWindow() {
   } else {
     logToFile('Loading prod URL via electron-serve');
     loadURL(mainWindow).catch(err => logToFile(`loadURL error: ${err.stack}`));
+    mainWindow.webContents.openDevTools();
   }
 
   mainWindow.on('closed', function () {
