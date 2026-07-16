@@ -80,10 +80,14 @@ export class OrchestrateClient {
 
   private async getIamToken(): Promise<string> {
     if (!this.config.apiKey) return '';
+    const body = new URLSearchParams();
+    body.append('grant_type', 'urn:ibm:params:oauth:grant-type:apikey');
+    body.append('apikey', this.config.apiKey.trim());
+
     const iamRes = await fetch("https://iam.cloud.ibm.com/identity/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=${this.config.apiKey}`
+      body: body
     });
     if (!iamRes.ok) {
       throw new Error(`Failed to authenticate with IBM Cloud: ${iamRes.statusText}`);

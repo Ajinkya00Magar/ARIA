@@ -17,14 +17,15 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@ibm-agent/types": "*",
     "@ibm-agent/shared": "*",
+    "@ibm-agent/types": "*",
+    "@supabase/supabase-js": "^2.110.6",
     "fast-glob": "^3.3.2",
     "simple-git": "^3.27.0",
     "tree-kill": "^1.2.2"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
   }
 }

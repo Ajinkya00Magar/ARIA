@@ -23,11 +23,11 @@ export default function LoginPage() {
         email,
         password,
       });
-
+      
       if (error) throw error;
       
       toast.success('Logged in successfully!');
-      router.replace('/dashboard');
+      router.replace('/workspace');
     } catch (err: any) {
       toast.error(err.message || 'Failed to login');
     } finally {
@@ -47,10 +47,10 @@ export default function LoginPage() {
         email,
         password,
       });
-
+      
       if (error) throw error;
       
-      toast.success('Signup successful! You can now log in.');
+      toast.success('Signup successful! Please check your email to verify your account.');
     } catch (err: any) {
       toast.error(err.message || 'Failed to sign up');
     } finally {
@@ -64,7 +64,7 @@ export default function LoginPage() {
         <form onSubmit={handleLogin}>
           <CardHeader>
             <CardTitle className="text-2xl font-bold">ARIA IDE</CardTitle>
-            <CardDescription>Sign in to access your free AI agent usage.</CardDescription>
+            <CardDescription>Sign in to access your AI agent workspace.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">

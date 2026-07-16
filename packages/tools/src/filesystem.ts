@@ -1,181 +1,111 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// File System Tools — Safe workspace-sandboxed file operations
+// File System Tools — Supabase Storage Backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-import fs from 'fs/promises';
-import path from 'path';
-import { createReadStream } from 'fs';
+import { createClient } from '@supabase/supabase-js';
 import { NotFoundError, WorkspaceError, ValidationError } from '@ibm-agent/shared';
-import { sanitizePath, getFileExtension, getLanguageFromExtension, formatBytes } from '@ibm-agent/shared';
+import { getFileExtension, getLanguageFromExtension, formatBytes } from '@ibm-agent/shared';
 import type { WorkspaceFile } from '@ibm-agent/types';
 
-const FORBIDDEN_PATHS = [
-  '/etc',
-  '/sys',
-  '/proc',
-  '/dev',
-  '/bin',
-  '/sbin',
-  '/usr/bin',
-  '/usr/sbin',
-  '/boot',
-  '/root',
-  'C:\\Windows',
-  'C:\\System32',
-];
-
-// write_file emits UTF-8 text — a compiled binary written through it is always
-// corrupt (Windows: "This app can't run on your PC" / "Access is denied").
-// Binaries must come from real build tools via run_terminal.
-const BINARY_WRITE_BLOCKLIST = new Set([
-  '.exe', '.dll', '.so', '.dylib', '.o', '.obj', '.a', '.lib', '.bin',
-  '.class', '.pyc', '.wasm',
-]);
+const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'dummy';
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false },
+});
 
 export class FileSystemTool {
-  constructor(private readonly workspaceRoot: string) {}
-
-  // ── Path Safety ───────────────────────────────────────────────────────────────
-
-  private resolveSafe(relativePath: string): string {
-    if (!relativePath || typeof relativePath !== 'string') {
-      throw new ValidationError('Path is required and must be a non-empty string');
-    }
-    const cleaned = sanitizePath(relativePath);
-    const resolved = path.resolve(this.workspaceRoot, cleaned);
-
-    // Ensure we stay within workspace
-    if (!resolved.startsWith(path.resolve(this.workspaceRoot))) {
-      throw new ValidationError(`Path escape attempt detected: ${relativePath}`);
-    }
-
-    // Check forbidden system paths
-    for (const forbidden of FORBIDDEN_PATHS) {
-      if (resolved.startsWith(forbidden)) {
-        throw new ValidationError(`Access to system path is not allowed: ${resolved}`);
-      }
-    }
-
-    return resolved;
-  }
-
-  // ── Read File ─────────────────────────────────────────────────────────────────
-
-  async readFile(
-    relativePath: string,
-    encoding: 'utf-8' | 'base64' = 'utf-8',
-  ): Promise<string> {
-    const fullPath = this.resolveSafe(relativePath);
-
-    try {
-      const stat = await fs.stat(fullPath);
-      if (stat.isDirectory()) {
-        throw new ValidationError(`Path is a directory, not a file: ${relativePath}`);
-      }
-
-      const maxSize = 10 * 1024 * 1024; // 10MB
-      if (stat.size > maxSize) {
-        throw new ValidationError(
-          `File too large (${formatBytes(stat.size)}). Max 10MB. Consider using search_code instead.`,
-        );
-      }
-
-      if (encoding === 'base64') {
-        const buf = await fs.readFile(fullPath);
-        return buf.toString('base64');
-      }
-
-      return await fs.readFile(fullPath, 'utf-8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new NotFoundError(`File: ${relativePath}`);
-      }
-      throw err;
+  // workspaceRoot is now the Workspace ID (used as a prefix in Supabase Storage)
+  constructor(private readonly workspaceRoot: string) {
+    if (this.workspaceRoot.startsWith('/')) {
+      this.workspaceRoot = this.workspaceRoot.substring(1);
     }
   }
 
-  // ── Write File ────────────────────────────────────────────────────────────────
+  private getPath(relativePath: string): string {
+    const clean = relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
+    if (clean === '' || clean === '.') return this.workspaceRoot;
+    return `${this.workspaceRoot}/${clean}`;
+  }
+
+  async readFile(relativePath: string, encoding: 'utf-8' | 'base64' = 'utf-8'): Promise<string> {
+    const fullPath = this.getPath(relativePath);
+    
+    const { data, error } = await supabase.storage.from('workspaces').download(fullPath);
+    if (error) {
+      throw new NotFoundError(`File: ${relativePath} (${error.message})`);
+    }
+
+    const buffer = await data.arrayBuffer();
+    if (encoding === 'base64') {
+      return Buffer.from(buffer).toString('base64');
+    }
+    return Buffer.from(buffer).toString('utf-8');
+  }
 
   async writeFile(
     relativePath: string,
     content: string,
     createDirectories = true,
   ): Promise<{ path: string; size: number; created: boolean }> {
-    const fullPath = this.resolveSafe(relativePath);
-
-    const ext = path.extname(fullPath).toLowerCase();
-    if (BINARY_WRITE_BLOCKLIST.has(ext)) {
-      throw new ValidationError(
-        `Refusing to write binary file "${relativePath}" as text — it would be corrupt. ` +
-        `Compiled artifacts must be produced by a build tool (e.g. g++, make) via run_terminal.`,
-      );
-    }
-
+    const fullPath = this.getPath(relativePath);
+    
+    // Check if exists
     let created = false;
-    try {
-      await fs.access(fullPath);
-    } catch {
+    const { data: existingData } = await supabase.storage.from('workspaces').list(this.getPath(relativePath.split('/').slice(0, -1).join('/')), {
+      search: relativePath.split('/').pop()!
+    });
+    
+    if (!existingData || existingData.length === 0) {
       created = true;
     }
 
-    if (createDirectories) {
-      await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    const buffer = Buffer.from(content, 'utf-8');
+    const { data, error } = await supabase.storage.from('workspaces').upload(fullPath, buffer, {
+      upsert: true,
+      contentType: 'text/plain;charset=UTF-8'
+    });
+
+    if (error) {
+      throw new WorkspaceError(`Failed to write file ${relativePath}: ${error.message}`);
     }
 
-    await fs.writeFile(fullPath, content, 'utf-8');
-    const stat = await fs.stat(fullPath);
-
-    return { path: relativePath, size: stat.size, created };
+    return { path: relativePath, size: buffer.length, created };
   }
-
-  // ── Delete File ───────────────────────────────────────────────────────────────
 
   async deleteFile(relativePath: string, recursive = true): Promise<string> {
-    const fullPath = this.resolveSafe(relativePath);
-
-    // Refuse to delete the workspace root itself, even recursively.
-    if (path.resolve(fullPath) === path.resolve(this.workspaceRoot)) {
-      throw new ValidationError('Cannot delete the workspace root directory');
-    }
-
-    try {
-      const stat = await fs.stat(fullPath);
-      if (stat.isDirectory()) {
-        if (!recursive) {
-          throw new ValidationError('Cannot delete directory without recursive=true');
-        }
-        await fs.rm(fullPath, { recursive: true, force: true });
+    const fullPath = this.getPath(relativePath);
+    
+    // In Supabase storage, to delete a "folder" recursively, we must list and delete all files with that prefix
+    if (recursive) {
+      const { data, error } = await supabase.storage.from('workspaces').list(fullPath);
+      if (error) throw new WorkspaceError(error.message);
+      
+      if (data && data.length > 0) {
+        const paths = data.map(f => `${fullPath}/${f.name}`);
+        await supabase.storage.from('workspaces').remove(paths);
         return `Directory deleted: ${relativePath}`;
-      } else {
-        await fs.unlink(fullPath);
-        return `File deleted: ${relativePath}`;
       }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new NotFoundError(`File: ${relativePath}`);
-      }
-      throw err;
     }
-  }
 
-  // ── Rename File ───────────────────────────────────────────────────────────────
+    const { error } = await supabase.storage.from('workspaces').remove([fullPath]);
+    if (error) throw new NotFoundError(`File: ${relativePath}`);
+
+    return `File deleted: ${relativePath}`;
+  }
 
   async renameFile(oldPath: string, newPath: string): Promise<string> {
-    const fullOld = this.resolveSafe(oldPath);
-    const fullNew = this.resolveSafe(newPath);
+    const oldFull = this.getPath(oldPath);
+    const newFull = this.getPath(newPath);
 
-    await fs.mkdir(path.dirname(fullNew), { recursive: true });
-    await fs.rename(fullOld, fullNew);
+    const { error } = await supabase.storage.from('workspaces').move(oldFull, newFull);
+    if (error) throw new WorkspaceError(error.message);
+
     return `Renamed: ${oldPath} → ${newPath}`;
   }
-
-  // ── Move File ─────────────────────────────────────────────────────────────────
 
   async moveFile(source: string, destination: string): Promise<string> {
     return this.renameFile(source, destination);
   }
-
-  // ── List Files ────────────────────────────────────────────────────────────────
 
   async listFiles(
     relativePath = '.',
@@ -183,58 +113,29 @@ export class FileSystemTool {
     includeHidden = false,
     maxDepth = 3,
   ): Promise<WorkspaceFile[]> {
-    const fullPath = this.resolveSafe(relativePath);
-
-    try {
-      await fs.access(fullPath);
-    } catch {
-      throw new NotFoundError(`Directory: ${relativePath}`);
-    }
-
-    return this.readDirRecursive(fullPath, this.workspaceRoot, recursive ? maxDepth : 1, includeHidden);
-  }
-
-  private async readDirRecursive(
-    dirPath: string,
-    rootPath: string,
-    depth: number,
-    includeHidden: boolean,
-  ): Promise<WorkspaceFile[]> {
-    if (depth <= 0) return [];
-
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    const fullPath = this.getPath(relativePath);
+    
+    const { data, error } = await supabase.storage.from('workspaces').list(fullPath, {
+      limit: 1000,
+    });
+    
+    if (error) throw new NotFoundError(`Directory: ${relativePath}`);
+    
     const files: WorkspaceFile[] = [];
-
-    for (const entry of entries) {
-      if (!includeHidden && entry.name.startsWith('.')) continue;
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue;
-
-      const fullPath = path.join(dirPath, entry.name);
-      const relativePath = path.relative(rootPath, fullPath);
-      const ext = getFileExtension(entry.name);
-
-      const file: WorkspaceFile = {
-        path: relativePath.replace(/\\/g, '/'),
-        name: entry.name,
-        type: entry.isDirectory() ? 'directory' : 'file',
-        language: entry.isFile() ? getLanguageFromExtension(ext) : undefined,
-      };
-
-      if (entry.isFile()) {
-        try {
-          const stat = await fs.stat(fullPath);
-          file.size = stat.size;
-          file.lastModified = stat.mtime;
-        } catch {
-          // ignore stat errors
-        }
-      }
-
-      if (entry.isDirectory() && depth > 1) {
-        file.children = await this.readDirRecursive(fullPath, rootPath, depth - 1, includeHidden);
-      }
-
-      files.push(file);
+    
+    for (const item of data) {
+      if (!includeHidden && item.name.startsWith('.')) continue;
+      
+      const isDir = !item.id; // Supabase returns null id for 'folders' (prefixes)
+      
+      files.push({
+        path: relativePath === '.' ? item.name : `${relativePath}/${item.name}`,
+        name: item.name,
+        type: isDir ? 'directory' : 'file',
+        size: item.metadata?.size,
+        lastModified: item.created_at ? new Date(item.created_at) : undefined,
+        language: isDir ? undefined : getLanguageFromExtension(getFileExtension(item.name)),
+      });
     }
 
     return files.sort((a, b) => {
@@ -243,71 +144,23 @@ export class FileSystemTool {
     });
   }
 
-  // ── Create Folder ─────────────────────────────────────────────────────────────
-
   async createFolder(relativePath: string): Promise<string> {
-    const fullPath = this.resolveSafe(relativePath);
-    await fs.mkdir(fullPath, { recursive: true });
+    // Supabase Storage doesn't have real folders. We create an empty .keep file to force the prefix to exist.
+    await this.writeFile(`${relativePath}/.keep`, '');
     return `Created directory: ${relativePath}`;
   }
 
-  // ── Directory Tree ────────────────────────────────────────────────────────────
-
   async readDirectory(relativePath = '.', maxDepth = 4): Promise<string> {
-    const fullPath = this.resolveSafe(relativePath);
-    const lines: string[] = [];
-    await this.buildTree(fullPath, '', 0, maxDepth, lines);
-    return lines.join('\n');
+    const files = await this.listFiles(relativePath, true, false, maxDepth);
+    return files.map(f => f.path).join('\n');
   }
-
-  private async buildTree(
-    dirPath: string,
-    prefix: string,
-    depth: number,
-    maxDepth: number,
-    lines: string[],
-  ): Promise<void> {
-    if (depth > maxDepth) return;
-
-    let entries: string[];
-    try {
-      entries = await fs.readdir(dirPath);
-    } catch {
-      return;
-    }
-
-    const filtered = entries.filter(
-      (e) => !e.startsWith('.') && e !== 'node_modules' && e !== 'dist' && e !== '.git',
-    );
-
-    for (let i = 0; i < filtered.length; i++) {
-      const entry = filtered[i];
-      const isLast = i === filtered.length - 1;
-      const fullPath = path.join(dirPath, entry);
-      const connector = isLast ? '└── ' : '├── ';
-      const childPrefix = isLast ? '    ' : '│   ';
-
-      let stat: Awaited<ReturnType<typeof fs.stat>>;
-      try {
-        stat = await fs.stat(fullPath);
-      } catch {
-        continue;
-      }
-
-      lines.push(`${prefix}${connector}${entry}${stat.isDirectory() ? '/' : ''}`);
-
-      if (stat.isDirectory()) {
-        await this.buildTree(fullPath, prefix + childPrefix, depth + 1, maxDepth, lines);
-      }
-    }
-  }
-
-  // ── File Exists ───────────────────────────────────────────────────────────────
 
   async exists(relativePath: string): Promise<boolean> {
     try {
-      await fs.access(this.resolveSafe(relativePath));
-      return true;
+      const { data, error } = await supabase.storage.from('workspaces').list(this.getPath(relativePath.split('/').slice(0, -1).join('/')), {
+        search: relativePath.split('/').pop()!
+      });
+      return !error && data && data.length > 0;
     } catch {
       return false;
     }

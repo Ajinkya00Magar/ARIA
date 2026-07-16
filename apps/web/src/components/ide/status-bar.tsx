@@ -24,9 +24,9 @@ export function StatusBar() {
   });
 
   const changedCount =
-    (gitStatus?.staged.length ?? 0) +
-    (gitStatus?.unstaged.length ?? 0) +
-    (gitStatus?.untracked.length ?? 0);
+    (gitStatus?.staged?.length ?? 0) +
+    (gitStatus?.unstaged?.length ?? 0) +
+    (gitStatus?.untracked?.length ?? 0);
 
   const agentIcon = {
     thinking: <Loader2 className="h-3 w-3 animate-spin text-yellow-300" />,

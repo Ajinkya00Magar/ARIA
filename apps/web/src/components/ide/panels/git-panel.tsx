@@ -63,7 +63,7 @@ export function GitPanel() {
   }
 
   const changedCount =
-    (status?.staged.length ?? 0) + (status?.unstaged.length ?? 0) + (status?.untracked.length ?? 0);
+    (status?.staged?.length ?? 0) + (status?.unstaged?.length ?? 0) + (status?.untracked?.length ?? 0);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -113,9 +113,9 @@ export function GitPanel() {
       <div className="flex-1 overflow-y-auto">
         {status && (
           <>
-            <FileSection title="Staged" files={status.staged.map((f) => ({ path: f.path, status: f.status }))} icon={<Check className="h-3 w-3 text-green-400" />} />
-            <FileSection title="Changes" files={status.unstaged.map((f) => ({ path: f.path, status: f.status }))} icon={<Circle className="h-3 w-3 text-yellow-400" />} />
-            <FileSection title="Untracked" files={status.untracked.map((f) => ({ path: f, status: '?' as const }))} icon={<Plus className="h-3 w-3 text-muted-foreground" />} />
+            <FileSection title="Staged" files={(status.staged ?? []).map((f) => ({ path: f.path, status: f.status }))} icon={<Check className="h-3 w-3 text-green-400" />} />
+            <FileSection title="Changes" files={(status.unstaged ?? []).map((f) => ({ path: f.path, status: f.status }))} icon={<Circle className="h-3 w-3 text-yellow-400" />} />
+            <FileSection title="Untracked" files={(status.untracked ?? []).map((f) => ({ path: f, status: '?' as const }))} icon={<Plus className="h-3 w-3 text-muted-foreground" />} />
           </>
         )}
       </div>

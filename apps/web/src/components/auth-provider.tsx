@@ -3,52 +3,77 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/auth-store';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [loading, setLoading] = useState(true);
+  const { user, setAuth } = useAuthStore();
+  const [mounted, setMounted] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
-    let mounted = true;
+    setMounted(true);
     
-    async function checkAuth() {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (mounted) {
-          if (!session && pathname !== '/login') {
-            router.replace('/login');
-          } else {
-            setLoading(false);
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          setLoading(false);
-          router.replace('/login');
-        }
+    // Check active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setAuth({
+          id: session.user.id,
+          email: session.user.email!,
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+          role: 'developer',
+          provider: 'local',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }, session.access_token);
       }
-    }
+      setIsInitializing(false);
+    });
 
-    checkAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session && pathname !== '/login') {
-        router.replace('/login');
-      } else if (session && pathname === '/login') {
-        router.replace('/workspace');
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setAuth({
+          id: session.user.id,
+          email: session.user.email!,
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+          role: 'developer',
+          provider: 'local',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }, session.access_token);
+      } else {
+        useAuthStore.getState().logout();
       }
     });
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [pathname, router]);
+    return () => subscription.unsubscribe();
+  }, [setAuth]);
 
-  if (loading && pathname !== '/login') {
-    return <div className="flex h-screen items-center justify-center">Loading ARIA IDE...</div>;
+  useEffect(() => {
+    if (!mounted || isInitializing) return;
+    const isAuthenticated = !!user;
+    
+    // Handle redirecting for unauthenticated users
+    if (!isAuthenticated && !pathname.startsWith('/auth') && pathname !== '/login') {
+      router.replace('/login');
+    } 
+    // Handle redirecting for authenticated users away from auth pages
+    else if (isAuthenticated && (pathname === '/auth/login' || pathname === '/auth/register' || pathname === '/login')) {
+      router.replace('/workspace');
+    }
+  }, [user, pathname, router, mounted, isInitializing]);
+
+  if (!mounted || isInitializing) {
+    return <div className="flex h-screen items-center justify-center bg-[#161616] text-[#f4f4f4]">Loading ARIA IDE...</div>;
+  }
+
+  // To prevent flashing protected content
+  if (!user && !pathname.startsWith('/auth') && pathname !== '/login') {
+    return <div className="flex h-screen items-center justify-center bg-[#161616] text-[#f4f4f4]">Redirecting to login...</div>;
   }
 
   return <>{children}</>;

@@ -46,11 +46,11 @@ export default function WorkspacePage() {
 
   const deleteWorkspace = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Remove this folder from recent workspaces? The folder and its files will not be deleted.')) return;
+    if (!confirm('Remove this workspace from recents?')) return;
     try {
       await apiClient.delete(`/workspaces/${id}`);
       setWorkspaces((prev) => prev.filter((w) => w.id !== id));
-      toast.success('Folder removed from recents');
+      toast.success('Workspace removed from recents');
     } catch {
       toast.error('Remove failed');
     }
@@ -137,7 +137,7 @@ export default function WorkspacePage() {
             className="flex items-center gap-2 px-4 py-2.5 bg-[#0f62fe] text-white rounded-lg text-sm font-medium hover:bg-[#0353e9] transition-colors shadow-lg shadow-[#0f62fe]/20"
           >
             <Plus className="w-4 h-4" />
-            Open Folder
+            Create Workspace
           </motion.button>
         </div>
 
@@ -146,7 +146,7 @@ export default function WorkspacePage() {
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8d8d8d]" />
           <input
             type="search"
-            placeholder="Search recent folders…"
+            placeholder="Search recent workspaces…"
             className="w-full pl-10 pr-4 py-2.5 bg-[#262626] border border-[#393939] rounded-lg text-sm text-white focus:outline-none focus:border-[#0f62fe] transition-colors placeholder:text-[#6f6f6f]"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -214,7 +214,7 @@ export default function WorkspacePage() {
                   <Sparkles className="w-9 h-9 text-[#4589ff] opacity-60" />
                 </div>
                 <div>
-                  <p className="font-semibold text-white text-lg">No folders opened yet</p>
+                  <p className="font-semibold text-white text-lg">No workspaces created yet</p>
                   <p className="text-sm text-[#8d8d8d] mt-1">
                     Create your first workspace to start coding with the IBM agent
                   </p>

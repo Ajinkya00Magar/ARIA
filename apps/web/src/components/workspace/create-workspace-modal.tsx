@@ -15,11 +15,10 @@ import { toast } from 'sonner';
 import type { Workspace } from '@ibm-agent/types';
 
 const Schema = z.object({
-  name: z.string().max(100).optional(),
+  name: z.string().min(1, 'Workspace name is required').max(100),
   description: z.string().max(500).optional(),
   gitUrl: z.string().url('Invalid URL').optional().or(z.literal('')),
   gitBranch: z.string().optional(),
-  path: z.string().min(1, 'Pick or enter a folder'),
 });
 type FormData = z.infer<typeof Schema>;
 
@@ -38,45 +37,19 @@ export function CreateWorkspaceModal({ onClose, onCreate }: Props) {
 
   const hasGitUrl = !!watch('gitUrl');
 
-  // Native OS folder picker (served by the Electron main process)
-  const pickFolder = async () => {
-    setIsPicking(true);
-    try {
-      const res = await apiClient.post<{ data: { canceled: boolean; path: string | null; unsupported?: boolean } }>(
-        '/system/pick-folder',
-      );
-      const { canceled, path, unsupported } = res.data.data;
-      if (unsupported) {
-        toast.info('Native folder picker unavailable — type the folder path manually.');
-        return;
-      }
-      if (!canceled && path) {
-        setValue('path', path, { shouldValidate: true });
-        const base = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path;
-        if (!watch('name')) setValue('name', base);
-      }
-    } catch (err: any) {
-      console.error(err);
-      toast.error(`Could not open the folder picker: ${err.message || String(err)}`);
-    } finally {
-      setIsPicking(false);
-    }
-  };
-
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
     try {
       const res = await apiClient.post<{ data: Workspace }>('/workspaces', {
-        name: data.name || undefined,
+        name: data.name,
         description: data.description || undefined,
         gitUrl: data.gitUrl || undefined,
         gitBranch: data.gitBranch || undefined,
-        path: data.path,
       });
       onCreate(res.data.data);
-      toast.success(`Folder opened!`);
+      toast.success(`Workspace created!`);
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Failed to open folder';
+      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Failed to create workspace';
       toast.error(msg);
     } finally {
       setIsLoading(false);
@@ -103,7 +76,7 @@ export function CreateWorkspaceModal({ onClose, onCreate }: Props) {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <FolderPlus className="h-5 w-5 text-primary" />
-              <h2 className="text-base font-semibold">Open Folder</h2>
+              <h2 className="text-base font-semibold">Create Workspace</h2>
             </div>
             <button onClick={onClose} className="p-1 rounded hover:bg-muted transition-colors">
               <X className="h-4 w-4" />
@@ -113,34 +86,10 @@ export function CreateWorkspaceModal({ onClose, onCreate }: Props) {
           {/* Form */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div>
-              <label className="text-sm font-medium mb-1.5 flex items-center gap-2">
-                <FolderPlus className="h-3.5 w-3.5" />
-                Folder *
-              </label>
-              <div className="flex gap-2">
-                <input
-                  {...register('path')}
-                  placeholder="C:\Users\username\Desktop\MyProject"
-                  className="flex-1 px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <button
-                  type="button"
-                  onClick={pickFolder}
-                  disabled={isPicking}
-                  className="px-3 py-2 border border-border rounded-lg text-sm hover:bg-muted transition-colors disabled:opacity-50 whitespace-nowrap"
-                >
-                  {isPicking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Browse…'}
-                </button>
-              </div>
-              <p className="text-muted-foreground text-xs mt-1">Pick any folder on your computer to work in it directly.</p>
-              {errors.path && <p className="text-destructive text-xs mt-1">{errors.path.message}</p>}
-            </div>
-
-            <div>
               <label className="text-sm font-medium mb-1.5 block">Name</label>
               <input
                 {...register('name')}
-                placeholder="Defaults to the folder name"
+                placeholder="My Awesome Project"
                 className="w-full px-3 py-2 bg-background border border-input rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
               {errors.name && <p className="text-destructive text-xs mt-1">{errors.name.message}</p>}
@@ -196,10 +145,10 @@ export function CreateWorkspaceModal({ onClose, onCreate }: Props) {
                 {isLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    {hasGitUrl ? 'Cloning…' : 'Opening…'}
+                    {hasGitUrl ? 'Cloning…' : 'Creating…'}
                   </>
                 ) : (
-                  hasGitUrl ? 'Clone into Folder' : 'Open Folder'
+                  hasGitUrl ? 'Clone Repository' : 'Create Workspace'
                 )}
               </button>
             </div>

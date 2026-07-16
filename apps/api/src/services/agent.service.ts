@@ -71,7 +71,7 @@ class AgentService {
     // ── Load workspace (optional — allow chat without a workspace) ─────────
     let ws: { id: string; path: string; projectSummary: unknown } | undefined;
     if (opts.workspaceId && env.IS_CLOUD_PROXY !== 'true') {
-      const record = await workspaceService.getRecord(opts.workspaceId);
+      const record = await workspaceService.getRecord(opts.workspaceId, opts.userId);
       if (record) {
         ws = { id: record.id, path: record.path, projectSummary: record.projectSummary };
       }
