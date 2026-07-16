@@ -43,14 +43,15 @@ async function main() {
     logger.error({ err: reason }, 'Unhandled rejection');
   });
 
-  process.on('uncaughtException', (err) => {
     logger.error({ err }, 'Uncaught exception in API');
     // We don't process.exit(1) here because the Electron main process
     // should handle the error dialog and graceful exit.
   });
 }
 
-// If we are NOT in Vercel, start the server normally with app.listen()
+// If we are NOT in a Serverless environment, start the server normally
+const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_VERSION;
+if (!isServerless) {
   main().catch((err) => {
     console.error('Failed to start server:', err);
     process.exit(1);
@@ -58,6 +59,6 @@ async function main() {
 }
 
 // Export the app for Vercel Serverless Functions
-export default app;
+module.exports = app;
 
 // Trigger Vercel deployment
