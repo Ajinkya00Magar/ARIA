@@ -51,7 +51,6 @@ async function main() {
 }
 
 // If we are NOT in Vercel, start the server normally with app.listen()
-if (process.env.VERCEL !== '1') {
   main().catch((err) => {
     console.error('Failed to start server:', err);
     process.exit(1);
@@ -60,3 +59,5 @@ if (process.env.VERCEL !== '1') {
 
 // Export the app for Vercel Serverless Functions
 export default app;
+
+// Trigger Vercel deployment
