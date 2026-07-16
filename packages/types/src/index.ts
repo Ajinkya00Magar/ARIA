@@ -101,9 +101,6 @@ export type ToolName =
   | 'create_folder'
   | 'search_code'
   | 'replace_code'
-  | 'run_terminal'
-  | 'run_tests'
-  | 'install_packages'
   | 'git_status'
   | 'git_commit'
   | 'git_branch'
@@ -112,10 +109,6 @@ export type ToolName =
   | 'git_push'
   | 'git_pull'
   | 'git_log'
-  | 'lint_project'
-  | 'build_project'
-  | 'start_dev_server'
-  | 'stop_dev_server'
   | 'read_directory';
 
 export interface ToolCall {
@@ -360,27 +353,6 @@ export interface GitBranch {
   isCurrent: boolean;
   isRemote: boolean;
   lastCommit?: string;
-}
-
-// ── Terminal ──────────────────────────────────────────────────────────────────
-
-export type TerminalStatus = 'idle' | 'running' | 'exited';
-
-export interface TerminalSession {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: TerminalStatus;
-  pid?: number;
-  cwd: string;
-  createdAt: Date;
-}
-
-export interface TerminalOutput {
-  sessionId: string;
-  data: string;
-  type: 'stdout' | 'stderr' | 'system';
-  timestamp: Date;
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

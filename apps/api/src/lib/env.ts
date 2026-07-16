@@ -41,7 +41,7 @@ const envSchema = z.object({
 
   // IBM watsonx — optional so the app always boots. If absent, the agent
   // degrades gracefully (chat requiring watsonx returns a helpful error) but
-  // the IDE, file access, git, and terminal all still work.
+  // the IDE, file access, and git all still work.
   IBM_CLOUD_API_KEY: z.string().default(''),
   IBM_PROJECT_ID: z.string().default(''),
   IBM_WATSONX_URL: z.string().url().default('https://us-south.ml.cloud.ibm.com'),

@@ -12,7 +12,6 @@ const PANELS = [
   { id: 'explorer', icon: Files, label: 'Explorer' },
   { id: 'search', icon: Search, label: 'Search' },
   { id: 'git', icon: GitBranch, label: 'Source Control' },
-  { id: 'terminal', icon: Terminal, label: 'Terminal' },
   { id: 'tasks', icon: CheckSquare, label: 'Tasks' },
   { id: 'memory', icon: Cpu, label: 'AI Memory' },
   { id: 'docs', icon: BookOpen, label: 'Documentation' },

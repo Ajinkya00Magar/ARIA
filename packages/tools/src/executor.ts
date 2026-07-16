@@ -5,7 +5,6 @@
 import type { ToolName } from '@ibm-agent/types';
 import { ToolExecutionError, createConsoleLogger } from '@ibm-agent/shared';
 import { FileSystemTool } from './filesystem';
-import { TerminalTool } from './terminal';
 import { GitTool } from './git';
 import { SearchTool } from './search';
 
@@ -13,17 +12,14 @@ const logger = createConsoleLogger('info');
 
 export class ToolExecutor {
   private readonly fs: FileSystemTool;
-  private readonly terminal: TerminalTool;
   private readonly git: GitTool;
   private readonly search: SearchTool;
 
   constructor(
     workspaceRoot: string,
     token: string | undefined,
-    requirePermission: (cmd: string) => Promise<boolean>,
   ) {
     this.fs = new FileSystemTool(workspaceRoot, token);
-    this.terminal = new TerminalTool(workspaceRoot, requirePermission);
     this.git = new GitTool(workspaceRoot);
     this.search = new SearchTool(workspaceRoot);
   }
@@ -155,63 +151,6 @@ export class ToolExecutor {
         return `Replaced ${result.replacements} occurrence(s).\n${result.preview}`;
       }
 
-      // ── Terminal ─────────────────────────────────────────────────────────────
-
-      case 'run_terminal': {
-        const result = await this.terminal.execute(
-          args.command as string,
-          (args.cwd as string) ?? '.',
-          (args.timeout as number) ?? 30_000,
-          args.env as Record<string, string> | undefined,
-        );
-        const output = [];
-        if (result.stdout) output.push(`STDOUT:\n${result.stdout}`);
-        if (result.stderr) output.push(`STDERR:\n${result.stderr}`);
-        output.push(`Exit code: ${result.exitCode} (${result.duration}ms)`);
-        return output.join('\n\n');
-      }
-
-      case 'run_tests': {
-        const result = await this.terminal.runTests(
-          args.testPattern as string | undefined,
-          (args.framework as string) ?? 'jest',
-          (args.coverage as boolean) ?? false,
-        );
-        return [result.stdout, result.stderr, `Exit: ${result.exitCode}`].filter(Boolean).join('\n\n');
-      }
-
-      case 'install_packages': {
-        const result = await this.terminal.installPackages(
-          args.packages as string[],
-          (args.packageManager as string) ?? 'npm',
-          (args.dev as boolean) ?? false,
-        );
-        return [result.stdout, result.stderr, `Exit: ${result.exitCode}`].filter(Boolean).join('\n\n');
-      }
-
-      case 'lint_project': {
-        const result = await this.terminal.lintProject(
-          args.path as string | undefined,
-          (args.fix as boolean) ?? false,
-        );
-        return [result.stdout, result.stderr].filter(Boolean).join('\n\n') || 'No lint issues found.';
-      }
-
-      case 'build_project': {
-        const result = await this.terminal.buildProject((args.clean as boolean) ?? false);
-        return [result.stdout, result.stderr, `Exit: ${result.exitCode}`].filter(Boolean).join('\n\n');
-      }
-
-      case 'start_dev_server': {
-        const cmd = (args.command as string) ?? 'npm run dev';
-        const { pid } = await this.terminal.startProcess('dev-server', cmd);
-        return `Development server started (PID: ${pid})`;
-      }
-
-      case 'stop_dev_server': {
-        return await this.terminal.stopProcess('dev-server');
-      }
-
       // ── Git ──────────────────────────────────────────────────────────────────
 
       case 'git_status': {
@@ -303,9 +242,5 @@ export class ToolExecutor {
 
   get searchTool(): SearchTool {
     return this.search;
-  }
-
-  get terminalTool(): TerminalTool {
-    return this.terminal;
   }
 }

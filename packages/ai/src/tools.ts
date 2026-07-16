@@ -131,46 +131,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       required: ['path', 'search', 'replace'],
     },
   },
-  {
-    name: 'run_terminal',
-    description: 'Execute a shell command in the workspace terminal. Dangerous commands require confirmation.',
-    parameters: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'Shell command to execute' },
-        cwd: { type: 'string', description: 'Working directory relative to workspace root (default: root)' },
-        timeout: { type: 'number', description: 'Timeout in milliseconds (default: 30000)' },
-        env: { type: 'object', description: 'Additional environment variables' },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'run_tests',
-    description: 'Run the project test suite or specific tests.',
-    parameters: {
-      type: 'object',
-      properties: {
-        testPattern: { type: 'string', description: 'Pattern to match test files or test names' },
-        framework: { type: 'string', description: 'Test framework (jest, vitest, pytest, etc.)', enum: ['jest', 'vitest', 'mocha', 'pytest', 'cargo test', 'go test'] },
-        coverage: { type: 'boolean', description: 'Generate coverage report (default: false)' },
-        watch: { type: 'boolean', description: 'Run in watch mode (default: false)' },
-      },
-    },
-  },
-  {
-    name: 'install_packages',
-    description: 'Install one or more packages using a package manager.',
-    parameters: {
-      type: 'object',
-      properties: {
-        packages: { type: 'array', description: 'List of package names to install', items: { type: 'string', description: 'Package name' } },
-        packageManager: { type: 'string', description: 'Package manager to use', enum: ['npm', 'pnpm', 'yarn', 'pip', 'pip3', 'cargo', 'go get', 'gradle', 'mvn'] },
-        dev: { type: 'boolean', description: 'Install as dev dependency (default: false)' },
-      },
-      required: ['packages'],
-    },
-  },
+
   {
     name: 'git_status',
     description: 'Get the current git status of the workspace, including staged, unstaged, and untracked files.',
@@ -263,49 +224,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       },
     },
   },
-  {
-    name: 'lint_project',
-    description: 'Run linting on the project or specific files.',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Path to lint (default: entire project)' },
-        fix: { type: 'boolean', description: 'Automatically fix fixable issues (default: false)' },
-      },
-    },
-  },
-  {
-    name: 'build_project',
-    description: 'Build or compile the project.',
-    parameters: {
-      type: 'object',
-      properties: {
-        target: { type: 'string', description: 'Build target (e.g. production, development)' },
-        clean: { type: 'boolean', description: 'Clean before building (default: false)' },
-      },
-    },
-  },
-  {
-    name: 'start_dev_server',
-    description: 'Start the development server.',
-    parameters: {
-      type: 'object',
-      properties: {
-        port: { type: 'number', description: 'Port to run on (default: from package.json)' },
-        command: { type: 'string', description: 'Custom start command (optional)' },
-      },
-    },
-  },
-  {
-    name: 'stop_dev_server',
-    description: 'Stop the running development server.',
-    parameters: {
-      type: 'object',
-      properties: {
-        port: { type: 'number', description: 'Port of the server to stop' },
-      },
-    },
-  },
+
 ];
 
 export function getToolByName(name: string): ToolDefinition | undefined {

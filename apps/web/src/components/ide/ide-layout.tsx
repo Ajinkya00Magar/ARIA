@@ -22,7 +22,7 @@ export function IdeLayout() {
   const [showChat, setShowChat] = useState(true);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showBottom, setShowBottom] = useState(false);
-  const [activeBottomPanel, setActiveBottomPanel] = useState<'terminal' | 'output' | 'problems'>('terminal');
+  const [activeBottomPanel, setActiveBottomPanel] = useState<'output' | 'problems'>('output');
   const { permissionRequest } = useAgentStore();
   const { setWorkspace } = useWorkspaceStore();
   const searchParams = useSearchParams();
@@ -49,20 +49,15 @@ export function IdeLayout() {
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'b') { e.preventDefault(); setShowSidebar((v) => !v); }
         if (e.key === 'j') { e.preventDefault(); setShowBottom((v) => !v); }
-        if (e.key === '`') { e.preventDefault(); setShowBottom(true); setActiveBottomPanel('terminal'); }
+        if (e.key === '`') { e.preventDefault(); setShowBottom(true); setActiveBottomPanel('output'); }
       }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  // When activity bar 'terminal' is clicked, open bottom panel
+  // When activity bar is clicked
   const handleSidebarChange = (panel: string) => {
-    if (panel === 'terminal') {
-      setShowBottom((v) => !v);
-      setActiveBottomPanel('terminal');
-      return;
-    }
     setActiveSidebarPanel(panel);
     setShowSidebar(true);
   };

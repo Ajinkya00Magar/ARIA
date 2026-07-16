@@ -17,7 +17,7 @@ async function main() {
     logger.info({ port, env: env.NODE_ENV, version: process.env.npm_package_version ?? '1.0.0' }, 'IBM Coding Agent API running on 127.0.0.1');
   });
 
-  // Terminal sockets are disabled for Serverless compatibility.
+
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

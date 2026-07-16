@@ -16,7 +16,6 @@ import { authRouter } from './routes/auth';
 import { workspaceRouter } from './routes/workspace';
 import { chatRouter } from './routes/chat';
 import { agentRouter } from './routes/agent';
-import { terminalRouter } from './routes/terminal';
 import { gitRouter } from './routes/git';
 import { filesRouter } from './routes/files';
 import { taskRouter, settingsRouter, metricsRouter } from './routes/tasks';
@@ -121,7 +120,6 @@ export function createApp(): Application {
   app.use('/api/workspaces', workspaceRouter);
   app.use('/api/chat', chatRouter);
   app.use('/api/agent', agentRouter);
-  app.use('/api/terminal', terminalRouter);
   app.use('/api/git', gitRouter);
   app.use('/api/files', filesRouter);
   app.use('/api/tasks', taskRouter);

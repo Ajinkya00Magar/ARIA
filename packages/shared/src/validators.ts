@@ -63,11 +63,6 @@ export const PaginationSchema = z.object({
   pageSize: z.coerce.number().min(1).max(100).default(20),
 });
 
-export const TerminalCommandSchema = z.object({
-  sessionId: z.string().uuid(),
-  command: z.string().min(1).max(8192),
-});
-
 export const PermissionResponseSchema = z.object({
   requestId: z.string().uuid(),
   approved: z.boolean(),
@@ -81,5 +76,4 @@ export type RegisterInput = z.infer<typeof RegisterSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type UpdateSettingsInput = z.infer<typeof UpdateSettingsSchema>;
 export type PaginationInput = z.infer<typeof PaginationSchema>;
-export type TerminalCommandInput = z.infer<typeof TerminalCommandSchema>;
 export type PermissionResponseInput = z.infer<typeof PermissionResponseSchema>;
