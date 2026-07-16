@@ -39,7 +39,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     req.user = { 
       sub: user.id, 
       email: user.email || '', 
-      role: 'user', 
+      role: 'developer', 
       iat: Math.floor(Date.now() / 1000), 
       exp: Math.floor(Date.now() / 1000) + 3600 
     };
