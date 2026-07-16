@@ -43,6 +43,7 @@ async function main() {
     logger.error({ err: reason }, 'Unhandled rejection');
   });
 
+  process.on('uncaughtException', (err) => {
     logger.error({ err }, 'Uncaught exception in API');
     // We don't process.exit(1) here because the Electron main process
     // should handle the error dialog and graceful exit.
