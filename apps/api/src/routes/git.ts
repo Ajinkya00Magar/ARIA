@@ -15,10 +15,18 @@ function getGit(workspacePath: string): GitTool {
 }
 
 // GET /api/git/:workspaceId/status
-gitRouter.get('/:workspaceId/status', async (req: Request, res: Response) => {
-  const ws = await workspaceService.findById((req.params.workspaceId as string), req.user!.sub);
-  const status = await getGit(ws.path).status();
-  res.json({ success: true, data: status });
+gitRouter.get('/:workspaceId/status', async (req: Request, res: Response, next) => {
+  try {
+    const ws = await workspaceService.findById((req.params.workspaceId as string), req.user!.sub);
+    const status = await getGit(ws.path).status();
+    res.json({ success: true, data: status });
+  } catch (err: any) {
+    if (err.name === 'ToolExecutionError' && err.message.includes('not a git repository')) {
+      res.json({ success: true, data: { branch: '', isClean: true, modified: [], staged: [], untracked: [] } });
+    } else {
+      next(err);
+    }
+  }
 });
 
 // POST /api/git/:workspaceId/commit
