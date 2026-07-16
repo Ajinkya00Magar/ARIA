@@ -16,6 +16,7 @@
     "@ibm-agent/shared": "*",
     "@ibm-agent/tools": "*",
     "@ibm-agent/types": "*",
+    "@supabase/supabase-js": "^2.110.6",
     "axios": "^1.7.9",
     "compression": "^1.7.5",
     "cookie-parser": "^1.4.7",

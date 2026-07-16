@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const BASE_URL =
   (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_API_URL : process.env.API_URL) ??
-  'http://127.0.0.1:3001';
+  (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001' : 'http://127.0.0.1:3002');
 
 export const apiClient = axios.create({
   baseURL: `${BASE_URL}/api`,
@@ -11,21 +11,18 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Inject JWT token from Zustand auth store on every request
-apiClient.interceptors.request.use((config) => {
-  // Dynamically import to avoid SSR issues
+import { supabase } from './supabase';
+
+// Inject JWT token from Supabase auth on every request
+apiClient.interceptors.request.use(async (config) => {
   if (typeof window !== 'undefined') {
     try {
-      const raw = localStorage.getItem('ibm-agent-auth');
-      if (raw) {
-        const parsed = JSON.parse(raw) as { state?: { accessToken?: string } };
-        const token = parsed?.state?.accessToken;
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        config.headers.Authorization = `Bearer ${data.session.access_token}`;
       }
     } catch {
-      // ignore JSON parse errors
+      // ignore
     }
   }
   return config;

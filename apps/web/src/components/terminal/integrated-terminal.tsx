@@ -105,7 +105,7 @@ export function IntegratedTerminal({ workspacePath }: IntegratedTerminalProps) {
     const fitTimeout = setTimeout(fitTerminal, 150);
 
     // ── Socket.io connection ──────────────────────────────────────────────
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001' : 'http://127.0.0.1:3002');
     const socket = io(`${baseUrl}/terminal`, {
       transports: ['websocket'],
       reconnectionAttempts: 5,

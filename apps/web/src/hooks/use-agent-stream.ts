@@ -14,15 +14,19 @@ export function useAgentStream() {
     setIsStreaming(true);
     abortControllerRef.current = new AbortController();
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001/api';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001/api' : 'http://127.0.0.1:3002/api');
 
     try {
-      // Need to pass token if authenticating
-      // This is a simple implementation, you might need to grab token from next-auth/zustand
-      const token = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('next-auth.session-token='))
-        ?.split('=')[1] ?? ''; // simplistic token retrieval, adjust if using other auth strategy
+      let token = '';
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.access_token) {
+          token = data.session.access_token;
+        }
+      } catch (e) {
+        console.warn('Failed to get Supabase token', e);
+      }
 
       const response = await fetch(`${baseUrl}/agent/run`, {
         method: 'POST',

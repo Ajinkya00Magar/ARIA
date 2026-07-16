@@ -37,7 +37,7 @@ loadEnvironmentFile();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().default(3001),
+  PORT: z.coerce.number().default(process.env.NODE_ENV === 'production' ? 3001 : 3002),
 
   // IBM watsonx — optional so the app always boots. If absent, the agent
   // degrades gracefully (chat requiring watsonx returns a helpful error) but
@@ -83,7 +83,7 @@ const envSchema = z.object({
 
   // App
   NEXTAUTH_URL: z.string().url().default('http://localhost:3000'),
-  API_URL: z.string().url().default('http://localhost:3001'),
+  API_URL: z.string().url().default(process.env.NODE_ENV === 'production' ? 'http://localhost:3001' : 'http://localhost:3002'),
   ALLOWED_ORIGINS: z
     .string()
     .default('http://localhost:3000')
@@ -93,6 +93,10 @@ const envSchema = z.object({
 
   // Redis (optional)
   REDIS_URL: z.string().optional(),
+
+  // Supabase (optional)
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
 });
 
 function parseEnv() {

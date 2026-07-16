@@ -20,8 +20,35 @@ agentRouter.post('/run', validate(SendMessageSchema), async (req: Request, res: 
     workspaceId: string;
   };
 
-  const userId = req.user?.sub ?? 'local-user';
+  const userId = req.user?.sub;
+  if (!userId) {
+    res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'User not authenticated' } });
+    return;
+  }
 
+  // Check usage limit
+  const { supabase } = require('../lib/supabase');
+  const { data: profile, error: dbError } = await supabase
+    .from('profiles')
+    .select('prompt_count')
+    .eq('id', userId)
+    .single();
+
+  if (dbError || !profile) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch user profile' } });
+    return;
+  }
+
+  if (profile.prompt_count >= 10) {
+    res.status(429).json({ success: false, error: { code: 'RATE_LIMIT', message: 'Free usage limit reached. Maximum 10 prompts allowed.' } });
+    return;
+  }
+
+  // Increment usage limit
+  await supabase
+    .from('profiles')
+    .update({ prompt_count: profile.prompt_count + 1 })
+    .eq('id', userId);
   // Set up SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');

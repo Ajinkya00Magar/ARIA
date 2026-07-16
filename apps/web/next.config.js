@@ -13,7 +13,7 @@ const nextConfig = {
   // Point the frontend at your locally-running API in dev,
   // and at your deployed API URL in production (set via env var).
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001' : 'http://127.0.0.1:3002'),
   },
   webpack(config, { isServer }) {
     if (!isServer) {

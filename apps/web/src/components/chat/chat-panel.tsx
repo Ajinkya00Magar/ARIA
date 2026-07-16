@@ -134,7 +134,7 @@ export function ChatPanel() {
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3001'}/api/agent/run`,
+        `${process.env.NEXT_PUBLIC_API_URL ?? (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001' : 'http://127.0.0.1:3002')}/api/agent/run`,
         {
           method: 'POST',
           headers: {
