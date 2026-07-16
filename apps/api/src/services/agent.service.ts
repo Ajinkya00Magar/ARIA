@@ -293,6 +293,9 @@ class AgentService {
             role: 'assistant',
             content: result.content,
             toolCalls: result.toolCalls as never,
+            toolResults: [] as never,
+            toolCallId: undefined,
+            name: undefined,
             createdAt: new Date(),
           });
 
@@ -318,7 +321,7 @@ class AgentService {
 
             opts.onEvent({
               type: 'tool_end',
-              data: { toolCallId: tc.id, toolName: tc.name, output },
+              data: { toolCallId: tc.id, toolName: tc.name, output, duration: 0 },
               timestamp: new Date()
             });
             toolResults.push({ id: tc.id, name: tc.name, output });
@@ -352,7 +355,7 @@ class AgentService {
         // For now, allow the agent to run without it or add it to opts later.
         projectSummary: null, 
         memories: [],
-        yieldForTools: true,
+        // yieldForTools: true, // Not supported in this version, handled natively by CodingAgent hooks
         onEvent: (event) => {
           opts.onEvent(event);
           if (event.type === 'content_done') {
@@ -369,6 +372,12 @@ class AgentService {
             const data = event.data as any;
             toolResults.push({ id: data.toolCallId, name: data.toolName, output: data.output });
           }
+        },
+        executeToolFn: async (toolName, args, _workspaceId) => {
+          return ''; // Cloud proxy yields execution to the client
+        },
+        requestPermissionFn: async (action, description, details) => {
+          return true; // Permissions are handled by the client
         },
       });
     } else if (ws && executor) {

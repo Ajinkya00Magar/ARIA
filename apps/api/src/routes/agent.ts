@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { agentService } from '../services/agent.service';
 import { validate } from '../middleware/validate';
+import { env } from '../lib/env';
 import { SendMessageSchema } from '@ibm-agent/shared';
 import type { AgentEvent } from '@ibm-agent/types';
 
