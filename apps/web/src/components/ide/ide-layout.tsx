@@ -26,7 +26,7 @@ export function IdeLayout() {
   const { permissionRequest } = useAgentStore();
   const { setWorkspace } = useWorkspaceStore();
   const searchParams = useSearchParams();
-  const id = searchParams.get('id');
+  const id = searchParams?.get('id');
 
   // Load workspace if ID in URL; otherwise send the user to the folder hub
   useEffect(() => {

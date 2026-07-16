@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isAuthenticated = !!user;
     
     // Handle redirecting for unauthenticated users
-    if (!isAuthenticated && !pathname.startsWith('/auth') && pathname !== '/login') {
+    if (!isAuthenticated && pathname && !pathname.startsWith('/auth') && pathname !== '/login') {
       router.replace('/login');
     } 
     // Handle redirecting for authenticated users away from auth pages
@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   // To prevent flashing protected content
-  if (!user && !pathname.startsWith('/auth') && pathname !== '/login') {
+  if (!user && pathname && !pathname.startsWith('/auth') && pathname !== '/login') {
     return <div className="flex h-screen items-center justify-center bg-[#161616] text-[#f4f4f4]">Redirecting to login...</div>;
   }
 

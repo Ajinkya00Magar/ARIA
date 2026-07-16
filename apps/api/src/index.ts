@@ -44,7 +44,7 @@ async function main() {
 
 // If we are NOT in a Serverless environment, start the server normally
 const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_VERSION;
-if (!isServerless) {
+if (!isServerless && require.main === module) {
   main().catch((err) => {
     console.error('Failed to start server:', err);
     process.exit(1);
