@@ -86,7 +86,7 @@ export class FileSystemTool {
       if (error) throw new WorkspaceError(error.message);
       
       if (data && data.length > 0) {
-        const paths = data.map(f => `${fullPath}/${f.name}`);
+        const paths = data.map((f: { name: string }) => `${fullPath}/${f.name}`);
         await this.supabase.storage.from('workspaces').remove(paths);
         return `Directory deleted: ${relativePath}`;
       }
