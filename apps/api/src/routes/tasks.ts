@@ -27,13 +27,13 @@ taskRouter.delete('/:id', (_req: Request, res: Response) => {
 export const settingsRouter = Router();
 settingsRouter.use(authenticate);
 
-settingsRouter.get('/', async (_req: Request, res: Response) => {
-  const settings = await getSettings();
+settingsRouter.get('/', async (req: Request, res: Response) => {
+  const settings = await getSettings(req.user!.sub);
   res.json({ success: true, data: settings });
 });
 
 settingsRouter.put('/', async (req: Request, res: Response) => {
-  const updated = await updateSettings(req.body ?? {});
+  const updated = await updateSettings(req.user!.sub, req.body ?? {});
   res.json({ success: true, data: updated });
 });
 

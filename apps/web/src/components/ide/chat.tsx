@@ -177,14 +177,26 @@ export function IDEChat({ workspaceId, onClose }: IDEChatProps) {
 
     try {
       const newChatId = await stream(
-        { chatId, content, workspaceId },
+        {
+          chatId,
+          content,
+          workspaceId,
+          chatHistory: messages.map((m) => ({
+            id: m.id,
+            chatId,
+            role: m.role,
+            content: m.content,
+            toolCalls: m.toolCalls,
+            createdAt: m.timestamp.toISOString(),
+          })),
+        },
         handleEvent,
       );
       if (newChatId && !chatId) setChatId(newChatId);
     } catch (err) {
       toast({ title: 'Agent error', description: String(err), variant: 'destructive' });
     }
-  }, [input, isStreaming, stream, chatId, workspaceId, handleEvent, scrollToBottom, toast]);
+  }, [input, isStreaming, stream, chatId, workspaceId, messages, handleEvent, scrollToBottom, toast]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

@@ -224,7 +224,149 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       },
     },
   },
-
+  {
+    name: 'analyze_code_complexity',
+    description: 'Calculate complexity scores, logical density, and nesting levels of functions in a file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path relative to workspace root' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'audit_security_rules',
+    description: 'Audit code for unsafe vulnerabilities (SQLi, XSS, eval) and hardcoded secrets/passwords.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path relative to workspace root' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'lint_and_format',
+    description: 'Prettify and clean up syntax formatting in a file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path relative to workspace root' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'generate_scaffold',
+    description: 'Generate boilerplate code files for components, APIs, Docker, and CI/CD pipelines.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Destination file path relative to workspace root' },
+        template: {
+          type: 'string',
+          description: 'Boilerplate template type',
+          enum: ['react-component', 'express-route', 'dockerfile', 'github-action', 'sql-migration'],
+        },
+        name: { type: 'string', description: 'Name of the component, route, or table' },
+      },
+      required: ['path', 'template', 'name'],
+    },
+  },
+  {
+    name: 'generate_openapi_schema',
+    description: 'Scan Express/Next.js API route definitions in a file and generate an OpenAPI 3.0 JSON specification.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'API route file path relative to workspace root' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'convert_code_format',
+    description: 'Convert data formats (JSON, YAML, CSV, or TypeScript interfaces).',
+    parameters: {
+      type: 'object',
+      properties: {
+        fromFormat: { type: 'string', enum: ['json', 'yaml', 'csv', 'typescript-interface'], description: 'Format to convert from' },
+        toFormat: { type: 'string', enum: ['json', 'yaml', 'csv', 'typescript-interface'], description: 'Format to convert to' },
+        content: { type: 'string', description: 'The raw string content to convert' },
+      },
+      required: ['fromFormat', 'toFormat', 'content'],
+    },
+  },
+  {
+    name: 'generate_mock_data',
+    description: 'Generate fake mock data datasets based on a schema description.',
+    parameters: {
+      type: 'object',
+      properties: {
+        schema: { type: 'string', description: 'JSON structure template or description of keys (e.g. name, email, age)' },
+        count: { type: 'number', description: 'Number of rows to generate (default: 5)' },
+      },
+      required: ['schema'],
+    },
+  },
+  {
+    name: 'search_symbols',
+    description: 'List classes, functions, and exports in a specific file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path relative to workspace root' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'analyze_dependencies',
+    description: 'Scan package.json for deprecated modules, licenses, and version statuses.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path to package.json relative to workspace root' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'generate_readme_summary',
+    description: 'Build a standard README markdown summary structure for the project.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the project' },
+        description: { type: 'string', description: 'A short overview of what the project does' },
+      },
+      required: ['name', 'description'],
+    },
+  },
+  {
+    name: 'refactor_helper',
+    description: 'Refactor code to optimize loops, simplify promises, or modernize ES6+ syntax.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path relative to workspace root' },
+        refactorType: { type: 'string', enum: ['performance', 'readability', 'modernization'], description: 'Type of refactoring to apply' },
+      },
+      required: ['path', 'refactorType'],
+    },
+  },
+  {
+    name: 'generate_unit_tests',
+    description: 'Auto-scaffold Vitest/Jest unit test suites for a source code file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Source code file path relative to workspace root' },
+      },
+      required: ['path'],
+    },
+  },
 ];
 
 export function getToolByName(name: string): ToolDefinition | undefined {

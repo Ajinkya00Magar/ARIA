@@ -7,6 +7,7 @@ import { ToolExecutionError, createConsoleLogger } from '@ibm-agent/shared';
 import { FileSystemTool } from './filesystem';
 import { GitTool } from './git';
 import { SearchTool } from './search';
+import { AgentFeaturesTool } from './features';
 
 const logger = createConsoleLogger('info');
 
@@ -14,6 +15,7 @@ export class ToolExecutor {
   private readonly fs: FileSystemTool;
   private readonly git: GitTool;
   private readonly search: SearchTool;
+  private readonly features: AgentFeaturesTool;
 
   constructor(
     workspaceRoot: string,
@@ -22,6 +24,7 @@ export class ToolExecutor {
     this.fs = new FileSystemTool(workspaceRoot, token);
     this.git = new GitTool(workspaceRoot);
     this.search = new SearchTool(workspaceRoot);
+    this.features = new AgentFeaturesTool(this.fs);
   }
 
   async execute(
@@ -224,6 +227,48 @@ export class ToolExecutor {
           .map((c) => `${c.shortHash} ${c.date.toISOString().split('T')[0]} ${c.author}: ${c.message}`)
           .join('\n');
       }
+
+      case 'analyze_code_complexity':
+        return await this.features.analyzeCodeComplexity(args.path as string);
+      case 'audit_security_rules':
+        return await this.features.auditSecurityRules(args.path as string);
+      case 'lint_and_format':
+        return await this.features.lintAndFormat(args.path as string);
+      case 'generate_scaffold':
+        return await this.features.generateScaffold(
+          args.path as string,
+          args.template as string,
+          args.name as string
+        );
+      case 'generate_openapi_schema':
+        return await this.features.generateOpenApiSchema(args.path as string);
+      case 'convert_code_format':
+        return await this.features.convertCodeFormat(
+          args.fromFormat as string,
+          args.toFormat as string,
+          args.content as string
+        );
+      case 'generate_mock_data':
+        return await this.features.generateMockData(
+          args.schema as string,
+          args.count as number | undefined
+        );
+      case 'search_symbols':
+        return await this.features.searchSymbols(args.path as string);
+      case 'analyze_dependencies':
+        return await this.features.analyzeDependencies(args.path as string);
+      case 'generate_readme_summary':
+        return await this.features.generateReadmeSummary(
+          args.name as string,
+          args.description as string
+        );
+      case 'refactor_helper':
+        return await this.features.refactorHelper(
+          args.path as string,
+          args.refactorType as string
+        );
+      case 'generate_unit_tests':
+        return await this.features.generateUnitTests(args.path as string);
 
       default:
         throw new ToolExecutionError(toolName, `Unknown tool: ${toolName}`);

@@ -109,7 +109,19 @@ export type ToolName =
   | 'git_push'
   | 'git_pull'
   | 'git_log'
-  | 'read_directory';
+  | 'read_directory'
+  | 'analyze_code_complexity'
+  | 'audit_security_rules'
+  | 'lint_and_format'
+  | 'generate_scaffold'
+  | 'generate_openapi_schema'
+  | 'convert_code_format'
+  | 'generate_mock_data'
+  | 'search_symbols'
+  | 'analyze_dependencies'
+  | 'generate_readme_summary'
+  | 'refactor_helper'
+  | 'generate_unit_tests';
 
 export interface ToolCall {
   id: string;

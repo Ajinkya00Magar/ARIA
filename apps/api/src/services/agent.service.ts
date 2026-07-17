@@ -123,7 +123,19 @@ class AgentService {
 
     // ── Load chat history ──────────────────────────────────────────────────
     let historyRows: any[] = [];
-    if (env.IS_CLOUD_PROXY === 'true') {
+    if (opts.chatHistory && opts.chatHistory.length > 0) {
+      historyRows = [...opts.chatHistory];
+      const lastMsg = historyRows[historyRows.length - 1];
+      if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== opts.userMessage) {
+        historyRows.push({
+          id: generateId(),
+          chatId: chatRow.id,
+          role: 'user',
+          content: opts.userMessage,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } else if (env.IS_CLOUD_PROXY === 'true') {
       // In Cloud Proxy, frontend/local sends the history in opts (needs to be added to opts if it's not there!)
       // Wait, let's just add `chatHistory` to opts!
       historyRows = opts.chatHistory || [];

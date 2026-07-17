@@ -19,7 +19,7 @@ toolRouter.post('/execute', validate(ExecuteToolSchema), async (req: Request, re
   const { workspaceId, toolName, arguments: args } = req.body;
 
   try {
-    const record = await workspaceService.getRecord(workspaceId);
+    const record = await workspaceService.getRecord(workspaceId, req.user!.sub);
     if (!record) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Workspace not found locally' } });
       return;
@@ -27,7 +27,7 @@ toolRouter.post('/execute', validate(ExecuteToolSchema), async (req: Request, re
 
     // TODO: Handle permissions properly for local execution if needed.
     // For now, assume the desktop app user implicitly allows execution since they ran the app.
-    const executor = new ToolExecutor(record.path, async () => true);
+    const executor = new ToolExecutor(record.path, req.headers.authorization);
 
     const output = await executor.execute(toolName as ToolName, args);
     res.json({ success: true, data: { output } });

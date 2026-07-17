@@ -8,7 +8,7 @@ export function useAgentStream() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const stream = useCallback(async (
-    params: { chatId: string; content: string; workspaceId: string },
+    params: { chatId: string; content: string; workspaceId: string; chatHistory?: any[] },
     onEvent: (event: AgentEvent) => void
   ): Promise<string | void> => {
     setIsStreaming(true);
