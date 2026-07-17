@@ -118,29 +118,51 @@ export class FileSystemTool {
     includeHidden = false,
     maxDepth = 3,
   ): Promise<WorkspaceFile[]> {
+    return this.listRecursive(relativePath, recursive ? maxDepth : 1, includeHidden);
+  }
+
+  private async listRecursive(
+    relativePath: string,
+    depth: number,
+    includeHidden: boolean,
+  ): Promise<WorkspaceFile[]> {
+    if (depth <= 0) return [];
+
     const fullPath = this.getPath(relativePath);
-    
     const { data, error } = await this.supabase.storage.from('workspaces').list(fullPath, {
       limit: 1000,
     });
     
-    if (error) throw new NotFoundError(`Directory: ${relativePath}`);
+    if (error) {
+      // Return empty instead of crashing if prefix does not exist
+      return [];
+    }
     
     const files: WorkspaceFile[] = [];
     
     for (const item of data) {
       if (!includeHidden && item.name.startsWith('.')) continue;
+      if (item.name === 'node_modules' || item.name === '.git' || item.name === '.next' || item.name === 'dist') {
+        continue;
+      }
       
       const isDir = !item.id; // Supabase returns null id for 'folders' (prefixes)
+      const itemRelativePath = relativePath === '.' ? item.name : `${relativePath}/${item.name}`;
       
-      files.push({
-        path: relativePath === '.' ? item.name : `${relativePath}/${item.name}`,
+      const file: WorkspaceFile = {
+        path: itemRelativePath,
         name: item.name,
         type: isDir ? 'directory' : 'file',
         size: item.metadata?.size,
         lastModified: item.created_at ? new Date(item.created_at) : undefined,
         language: isDir ? undefined : getLanguageFromExtension(getFileExtension(item.name)),
-      });
+      };
+
+      if (isDir && depth > 1) {
+        file.children = await this.listRecursive(itemRelativePath, depth - 1, includeHidden);
+      }
+      
+      files.push(file);
     }
 
     return files.sort((a, b) => {
