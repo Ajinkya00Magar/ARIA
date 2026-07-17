@@ -14,7 +14,7 @@ export function useAgentStream() {
     setIsStreaming(true);
     abortControllerRef.current = new AbortController();
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001/api' : 'http://127.0.0.1:3002/api');
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001/api' : 'http://127.0.0.1:3002/api');
 
     try {
       let token = '';
