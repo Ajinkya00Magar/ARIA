@@ -8,6 +8,8 @@ import { validate } from '../middleware/validate';
 import { workspaceService } from '../services/workspace.service';
 import { CreateWorkspaceSchema, UpdateWorkspaceSchema } from '@ibm-agent/shared';
 import { z } from 'zod';
+import { FileSystemTool } from '@ibm-agent/tools';
+const archiver = require('archiver');
 
 export const workspaceRouter = Router();
 workspaceRouter.use(authenticate);
@@ -79,6 +81,57 @@ workspaceRouter.post('/:id/analyze', async (req: Request, res: Response, next: N
   try {
     const summary = await workspaceService.analyze(req.params.id as string, req.user!.sub as string);
     res.json({ success: true, data: summary });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/workspaces/:id/download
+workspaceRouter.get('/:id/download', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const record = await workspaceService.getRecord(req.params.id as string, req.user!.sub as string);
+    if (!record) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Workspace not found' } });
+      return;
+    }
+
+    res.setHeader('Content-Disposition', `attachment; filename="${record.name}.zip"`);
+    res.setHeader('Content-Type', 'application/zip');
+
+    const archive = (archiver as any)('zip', { zlib: { level: 9 } });
+    archive.pipe(res);
+
+    const fsTool = new FileSystemTool(record.path, req.headers.authorization);
+
+    async function addDirectoryToArchive(fs: FileSystemTool, currentDir = '.') {
+      const items = await fs.listFiles(currentDir, false, true);
+      for (const item of items) {
+        if (
+          item.name === 'node_modules' ||
+          item.name === '.git' ||
+          item.name === '.next' ||
+          item.name === 'dist' ||
+          item.name === '.keep'
+        ) {
+          continue;
+        }
+
+        if (item.type === 'file') {
+          try {
+            const fileData = await fs.readFile(item.path, 'base64');
+            const buffer = Buffer.from(fileData, 'base64');
+            archive.append(buffer, { name: item.path });
+          } catch (e) {
+            console.error(`Failed to read file ${item.path} for zipping`, e);
+          }
+        } else if (item.type === 'directory') {
+          await addDirectoryToArchive(fs, item.path);
+        }
+      }
+    }
+
+    await addDirectoryToArchive(fsTool);
+    await archive.finalize();
   } catch (err) {
     next(err);
   }

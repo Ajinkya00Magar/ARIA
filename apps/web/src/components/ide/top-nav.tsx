@@ -4,13 +4,14 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Code2, ChevronDown, Play, Square, GitBranch, Bell,
   Settings, User, LogOut, FolderOpen, Terminal, LayoutPanelLeft,
-  MessageSquareText, Wifi, WifiOff, Loader2,
+  MessageSquareText, Wifi, WifiOff, Loader2, Download
 } from 'lucide-react';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAgentStore } from '@/stores/agent-store';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TopNavProps {
@@ -27,11 +28,52 @@ export function TopNav({ showChat, showSidebar, onToggleChat, onToggleSidebar }:
   const { user, logout } = useAuthStore();
   const { agentStatus } = useAgentStore();
   const router = useRouter();
+  const { toast } = useToast();
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
+
+  const handleDownloadZip = async () => {
+    if (!currentWorkspace) return;
+    toast({ title: 'Preparing download', description: 'Generating ZIP archive of the workspace...' });
+    
+    try {
+      let token = '';
+      const { supabase } = await import('@/lib/supabase');
+      const session = await supabase.auth.getSession();
+      if (session.data?.session?.access_token) {
+        token = session.data.session.access_token;
+      }
+
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? (process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:3001/api' : 'http://127.0.0.1:3002/api');
+      const response = await fetch(`${baseUrl}/workspaces/${currentWorkspace.id}/download`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to download: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${currentWorkspace.name}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast({ title: 'Download complete', description: `${currentWorkspace.name}.zip downloaded successfully.` });
+    } catch (err: any) {
+      console.error(err);
+      toast({ title: 'Download failed', description: err.message || 'An error occurred during ZIP creation.', variant: 'destructive' });
+    }
+  };
 
   // Close menus on outside click
   useEffect(() => {
@@ -58,6 +100,10 @@ export function TopNav({ showChat, showSidebar, onToggleChat, onToggleSidebar }:
         { label: 'Open Workspace', icon: FolderOpen, action: () => router.push('/workspace') },
         { separator: true },
         { label: 'New Workspace', action: () => router.push('/workspace') },
+        ...(currentWorkspace ? [
+          { separator: true as const },
+          { label: 'Download Project (.zip)', icon: Download, action: handleDownloadZip }
+        ] : [])
       ],
     },
     {
